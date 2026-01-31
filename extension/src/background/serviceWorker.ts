@@ -4,8 +4,17 @@
 // Track router address (will be configurable)
 const ROUTER_ADDRESS = '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512';
 
+interface PendingRequest {
+    callback: (response: any) => void;
+    payload: {
+        to: string;
+        value: string;
+        data: string;
+    };
+}
+
 // Store pending requests: reqId -> { callback, payload }
-const pendingRequests = new Map();
+const pendingRequests = new Map<string, PendingRequest>();
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'MAGNEE_TX') {
@@ -14,7 +23,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const reqId = Date.now().toString(); // Internal ID for background<->popup
 
         // Store secure payload and callback in memory
-        // Ideally use chrome.storage.session for payload persistence across SW restarts
         pendingRequests.set(reqId, {
             callback: sendResponse,
             payload: { to, value, data }
@@ -23,10 +31,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         console.log('[Magnee BG] Opening approval popup for:', reqId);
 
         chrome.windows.create({
-            url: `src/ui/approval.html?id=${reqId}`, // Only ID passed in URL
+            url: `src/ui/popup.html?id=${reqId}`, // Updated to popup.html
             type: 'popup',
-            width: 400,
-            height: 600,
+            width: 420,
+            height: 650,
             focused: true
         });
 

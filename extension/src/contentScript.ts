@@ -4,6 +4,8 @@
 (function () {
     // Inject the provider wrapper script into the page
     const script = document.createElement('script');
+    // NOTE: This points to the BUILT wrapper in dist/src/injected/providerWrapper.js
+    // Vite config ensures this path exists.
     script.src = chrome.runtime.getURL('src/injected/providerWrapper.js');
     script.type = 'module';
 
@@ -18,10 +20,21 @@
             console.log('[Magnee Content] Forwarding to BG:', event.data);
 
             // Forward Request to Background
+            if (!chrome.runtime?.id) {
+                console.warn('[Magnee] Extension context invalidated. Please refresh the page.');
+                return;
+            }
+
             chrome.runtime.sendMessage({
                 type: 'MAGNEE_TX',
                 payload: event.data.payload
             }, (response) => {
+                // Check for runtime errors (like context invalidation during request)
+                if (chrome.runtime.lastError) {
+                    console.warn('[Magnee] Runtime connection failed:', chrome.runtime.lastError.message);
+                    return;
+                }
+
                 // Send Response back to Page
                 console.log('[Magnee Content] Response from BG:', response);
                 window.postMessage({
