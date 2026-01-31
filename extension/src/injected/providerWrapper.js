@@ -1,73 +1,148 @@
-// Injected provider wrapper: intercepts window.ethereum.request calls
-// This runs in the page context (main world)
+console.log('[Magnee] Provider wrapper injecting...');
 
-(function () {
-    // Wait for ethereum provider to appear
-    const checkAndWrap = () => {
-        if (typeof window.ethereum === 'undefined') {
-            return false;
-        }
+function wrapProvider(provider) {
+    if (!provider || provider._magneeWrapped) return provider;
 
-        // Don't wrap twice
-        if (window.ethereum._magneeWrapped) {
-            return true;
-        }
+    console.log('[Magnee] Wrapping provider:', provider);
 
-        const originalRequest = window.ethereum.request.bind(window.ethereum);
+    const originalRequest = provider.request.bind(provider);
 
-        // Wrap the request method
-        window.ethereum.request = async function (args) {
-            console.log('[Magnee] Intercepted request:', args);
+    provider.request = async function (args) {
+        console.log('[Magnee] Intercepted request:', args);
 
-            // Check if this is a transaction with value (candidate for Magnee)
-            if (args.method === 'eth_sendTransaction') {
-                const tx = args.params?.[0];
+        if (args.method === 'eth_sendTransaction') {
+            const tx = args.params?.[0];
 
-                if (tx && tx.value && BigInt(tx.value) > 0n) {
-                    console.log('[Magnee] Found payable transaction:', tx);
+            if (tx && tx.value && BigInt(tx.value) > 0n) {
+                console.log('[Magnee] Found payable transaction:', tx);
 
-                    // For this spike: just log and pass through
-                    // TODO: Show UI, get quote, rewrite tx
-                    console.log('[Magnee] Candidate for Magneefy:', {
-                        to: tx.to,
-                        value: tx.value,
-                        data: tx.data || '0x'
-                    });
+                return new Promise((resolve, reject) => {
+                    const reqId = Date.now() + '-' + Math.random().toString(36).substr(2, 9);
 
-                    // For now, add a marker that we saw it
-                    console.log('[Magnee] Passing through original tx (spike mode)');
-                }
+                    const handleResponse = (event) => {
+                        if (event.source !== window ||
+                            event.data?.type !== 'MAGNEE_FROM_BACKGROUND' ||
+                            event.data?.id !== reqId) {
+                            return;
+                        }
+
+                        window.removeEventListener('message', handleResponse);
+
+                        // Handle error response from background/popup
+                        if (event.data.payload?.error) {
+                            console.error('[Magnee] Error from UI:', event.data.payload.error);
+                            resolve(originalRequest(args));
+                            return;
+                        }
+
+                        const { action } = event.data.payload || {};
+                        console.log('[Magnee] Received response action:', action);
+
+                        if (action === 'MAGNEEFY') {
+                            console.log('[Magnee] User chose to Magneefy! Rewriting transaction...');
+
+                            // ROUTER ADDRESS (from Anvil deploy)
+                            const ROUTER_ADDR = '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512';
+
+                            // 1. Prepare Calldata for forward(address target, bytes data)
+                            // Selector: 0xd948d468
+                            const selector = '0xd948d468';
+
+                            // Param 1: Target Address (padded to 32 bytes)
+                            const target = tx.to.startsWith('0x') ? tx.to.slice(2) : tx.to;
+                            const targetPadded = target.padStart(64, '0');
+
+                            // Data handling
+                            const originalData = (tx.data && tx.data !== '0x') ? (tx.data.startsWith('0x') ? tx.data.slice(2) : tx.data) : '';
+                            const dataLength = originalData.length / 2;
+
+                            // Param 2: Offset to bytes (0x40 = 64 bytes)
+                            const offsetPadded = '0000000000000000000000000000000000000000000000000000000000000040';
+
+                            // Param 3: Length of bytes
+                            const lengthPadded = dataLength.toString(16).padStart(64, '0');
+
+                            // Param 4: Data itself (padded to 32 bytes)
+                            const dataContent = originalData.padEnd(Math.ceil(originalData.length / 64) * 64, '0');
+
+                            const newData = selector + targetPadded + offsetPadded + lengthPadded + dataContent;
+
+                            // Construct new tx object
+                            const newTx = { ...tx };
+                            newTx.to = ROUTER_ADDR;
+                            newTx.data = newData;
+                            // Keep value same for now (ETH passthrough)
+
+                            console.log('[Magnee] Rewritten Tx:', newTx);
+
+                            // Update args with new tx
+                            const newArgs = { ...args };
+                            newArgs.params = [newTx];
+
+                            resolve(originalRequest(newArgs));
+
+                        } else if (action === 'REJECT') {
+                            reject(new Error('User rejected transaction via Magnee'));
+                        } else {
+                            console.log('[Magnee] User chose original flow');
+                            resolve(originalRequest(args));
+                        }
+                    };
+
+                    window.addEventListener('message', handleResponse);
+
+                    window.postMessage({
+                        type: 'MAGNEE_TO_BACKGROUND',
+                        id: reqId,
+                        payload: tx
+                    }, '*');
+                });
             }
+        }
 
-            // Always pass through to original for now
-            return originalRequest(args);
-        };
-
-        window.ethereum._magneeWrapped = true;
-        console.log('[Magnee] Provider wrapped successfully');
-        return true;
+        return originalRequest(args);
     };
 
-    // Try immediately
-    if (!checkAndWrap()) {
-        // Fallback: watch for provider to appear
-        let attempts = 0;
-        const maxAttempts = 50;
+    provider._magneeWrapped = true;
+    return provider;
+}
 
-        const interval = setInterval(() => {
-            attempts++;
-            if (checkAndWrap() || attempts >= maxAttempts) {
-                clearInterval(interval);
-                if (attempts >= maxAttempts) {
-                    console.log('[Magnee] No ethereum provider found after waiting');
-                }
-            }
-        }, 100);
+// 1. Wrap existing window.ethereum
+if (window.ethereum) {
+    wrapProvider(window.ethereum);
+}
 
-        // Also listen for provider announcement (EIP-6963)
-        window.addEventListener('eip6963:announceProvider', (event) => {
-            console.log('[Magnee] EIP-6963 provider announced:', event.detail);
-            // Could wrap this provider too
-        });
+// 2. Trap future window.ethereum assignments (for Rabby/MetaMask overwrite)
+try {
+    let _ethereum = window.ethereum;
+    Object.defineProperty(window, 'ethereum', {
+        get() { return _ethereum; },
+        set(newProvider) {
+            console.log('[Magnee] window.ethereum being overwritten', newProvider);
+            _ethereum = wrapProvider(newProvider);
+        },
+        configurable: true
+    });
+} catch (e) {
+    console.warn('[Magnee] Cannot redefine window.ethereum (already locked?):', e);
+    // Fallback: Poll for changes if we couldn't trap the setter
+    let lastEth = window.ethereum;
+    setInterval(() => {
+        if (window.ethereum !== lastEth) {
+            console.log('[Magnee] Detected window.ethereum change via polling');
+            wrapProvider(window.ethereum);
+            lastEth = window.ethereum;
+        }
+    }, 100);
+}
+
+// 3. EIP-6963 Interception
+window.addEventListener('eip6963:announceProvider', (event) => {
+    const provider = event.detail.provider;
+    if (provider && !provider._magneeWrapped) {
+        console.log('[Magnee] EIP-6963 provider announced:', event.detail.info.name);
+        wrapProvider(provider);
     }
-})();
+});
+
+console.log('[Magnee] Injection complete');

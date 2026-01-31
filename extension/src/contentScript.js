@@ -10,28 +10,26 @@
     // Inject as early as possible
     (document.head || document.documentElement).appendChild(script);
 
-    // Bridge messages between page and extension
+    // Bridge messages: Page -> Background
     window.addEventListener('message', (event) => {
         if (event.source !== window) return;
+
         if (event.data?.type === 'MAGNEE_TO_BACKGROUND') {
-            // Forward to background script
-            chrome.runtime.sendMessage(event.data.payload, (response) => {
+            console.log('[Magnee Content] Forwarding to BG:', event.data);
+
+            // Forward Request to Background
+            chrome.runtime.sendMessage({
+                type: 'MAGNEE_TX',
+                payload: event.data.payload
+            }, (response) => {
+                // Send Response back to Page
+                console.log('[Magnee Content] Response from BG:', response);
                 window.postMessage({
                     type: 'MAGNEE_FROM_BACKGROUND',
                     id: event.data.id,
                     payload: response
                 }, '*');
             });
-        }
-    });
-
-    // Listen for messages from background
-    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-        if (message.type === 'MAGNEE_TO_PAGE') {
-            window.postMessage({
-                type: 'MAGNEE_FROM_BACKGROUND',
-                payload: message.payload
-            }, '*');
         }
     });
 
