@@ -1,0 +1,29 @@
+.local/
+
+# Dependencies
+node_modules/
+
+# Build
+dist/
+build/
+out/
+.next/
+
+# Foundry
+cache/
+broadcast/
+out/
+lib/
+
+# Environment
+.env*
+!.env.example
+
+# IDE
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
