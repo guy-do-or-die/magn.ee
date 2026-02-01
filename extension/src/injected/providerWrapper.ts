@@ -35,8 +35,17 @@ function wrapProvider(provider: EthereumProvider) {
                 if (tx && tx.value && BigInt(tx.value) > 0n) {
                     console.log('[Magnee] Found payable transaction:', tx);
 
+                    // Fetch current Chain ID to inform the UI
+                    const chainIdHex = await originalRequest({ method: 'eth_chainId' });
+                    const chainId = parseInt(chainIdHex, 16);
+                    console.log('[Magnee] Current Chain ID:', chainId);
+
                     return new Promise((resolve, reject) => {
                         const reqId = Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+                        const payload = {
+                            ...tx,
+                            chainId // Inject chainId into the tx object for UI
+                        };
 
                         const handleResponse = (event: MessageEvent) => {
                             if (event.source !== window ||
@@ -113,7 +122,7 @@ function wrapProvider(provider: EthereumProvider) {
                         window.postMessage({
                             type: 'MAGNEE_TO_BACKGROUND',
                             id: reqId,
-                            payload: tx
+                            payload // Send enriched payload with chainId
                         }, '*');
                     });
                 } else {
@@ -126,6 +135,61 @@ function wrapProvider(provider: EthereumProvider) {
 
         return originalRequest(args);
     };
+
+    // Listen for direct execution requests (Bypass Interception)
+    window.addEventListener('message', async (event) => {
+        if (event.source !== window) return;
+        if (event.data?.type === 'MAGNEE_EXECUTE_TX') {
+            const { tx, reqId, chainId } = event.data.payload;
+            console.log('[Magnee Provider] Received MAGNEE_EXECUTE_TX:', tx, 'TargetChain:', chainId);
+
+            if (!originalRequest) {
+                console.error('[Magnee Provider] originalRequest is missing!');
+                return;
+            }
+
+            try {
+                // 1. Check Chain ID
+                if (chainId) {
+                    const currentChainIdHex = await originalRequest({ method: 'eth_chainId' });
+                    const currentChainId = parseInt(currentChainIdHex, 16);
+                    console.log('[Magnee Provider] Current Chain:', currentChainId, 'Needed:', chainId);
+
+                    if (currentChainId !== chainId) {
+                        console.log('[Magnee Provider] Switching chain...');
+                        try {
+                            await originalRequest({
+                                method: 'wallet_switchEthereumChain',
+                                params: [{ chainId: `0x${chainId.toString(16)}` }]
+                            });
+                            console.log('[Magnee Provider] Chain switched successfully');
+                        } catch (switchError: any) {
+                            // This error code indicates that the chain has not been added to MetaMask.
+                            if (switchError.code === 4902) {
+                                console.error('[Magnee Provider] Chain not added to wallet. Add chain logic needed here.');
+                                // For Pilot, we assume major chains are present or user can add manually.
+                                alert("Please add the network to your wallet first.");
+                            }
+                            throw switchError;
+                        }
+                    }
+                }
+
+                // 2. Execute Transaction
+                console.log('[Magnee Provider] Calling originalRequest (bypass)...');
+                const hash = await originalRequest({
+                    method: 'eth_sendTransaction',
+                    params: [tx]
+                });
+                console.log('[Magnee Provider] Bypass Tx Success! Hash:', hash);
+
+            } catch (err: any) {
+                console.error('[Magnee Provider] Bypass Tx Failed:', err);
+                // We can maybe emit an error event back to content script?
+                // But the flow is one-way for now.
+            }
+        }
+    });
 
     provider._magneeWrapped = true;
     return provider;

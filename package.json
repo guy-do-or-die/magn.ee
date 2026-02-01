@@ -14,7 +14,7 @@
         "build:ext": "cd extension && bun run build",
         "build:demo": "cd demo && bun run build",
         "anvil": "anvil --host 0.0.0.0 --port 8545",
-        "deploy": "cd contracts && forge script script/Deploy.s.sol --broadcast --rpc-url http://127.0.0.1:8545 --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
+        "deploy:chain": "source .env && cd contracts && forge script script/DeployDemo.s.sol --account default --broadcast --verify --rpc-url",
         "test": "bun run test:ext && bun run test:contracts",
         "test:ext": "cd extension && bun test",
         "test:contracts": "cd contracts && forge test"

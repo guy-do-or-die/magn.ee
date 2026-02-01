@@ -12,6 +12,17 @@ contract PayableDemo {
     uint256 public totalDonations;
     mapping(address => uint256) public donations;
 
+    address public owner;
+
+    constructor() {
+        owner = msg.sender;
+    }
+
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Only owner can call this function");
+        _;
+    }
+
     function donate(string calldata message) external payable {
         require(msg.value > 0, "Must send ETH");
 
@@ -25,5 +36,10 @@ contract PayableDemo {
         donations[msg.sender] += msg.value;
         totalDonations += msg.value;
         emit DonationReceived(msg.sender, msg.value, "");
+    }
+
+    function withdraw() external onlyOwner {
+        (bool success, ) = owner.call{value: address(this).balance}("");
+        require(success, "Withdraw failed");
     }
 }

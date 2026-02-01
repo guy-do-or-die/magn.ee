@@ -10,7 +10,10 @@ interface PendingRequest {
         to: string;
         value: string;
         data: string;
+        from?: string;
+        chainId?: number;
     };
+    tabId?: number; // Store origin tab
 }
 
 // Store pending requests: reqId -> { callback, payload }
@@ -18,17 +21,18 @@ const pendingRequests = new Map<string, PendingRequest>();
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'MAGNEE_TX') {
-        const { to, value, data } = message.payload;
+        const { to, value, data, from, chainId } = message.payload;
 
         const reqId = Date.now().toString(); // Internal ID for background<->popup
 
         // Store secure payload and callback in memory
         pendingRequests.set(reqId, {
             callback: sendResponse,
-            payload: { to, value, data }
+            payload: { to, value, data, from, chainId },
+            tabId: sender.tab?.id
         });
 
-        console.log('[Magnee BG] Opening approval popup for:', reqId);
+        console.log('[Magnee BG] Opening approval popup for:', reqId, 'Chain:', chainId);
 
         chrome.windows.create({
             url: `src/ui/popup.html?id=${reqId}`, // Updated to popup.html
@@ -64,6 +68,45 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             pendingRequests.delete(id);
         }
         return true;
+    }
+
+    if (message.type === 'MAGNEE_TRIGGER_TX') {
+        const { tx, reqId } = message.payload;
+        console.log('[Magnee BG] Triggering Side-Effect Tx:', reqId, tx);
+
+        // We need to find the tab ID for this request.
+        // currently we don't store tabId in pendingRequests. 
+        // BUT, we can query active tabs or broadcast? 
+        // BETTER: Service worker should have stored the Tab ID when `MAGNEE_TX` came in.
+        // Let's assume we fix that later. For now, try to find the active tab or broadcast.
+
+        // Actually, let's fix the storage first.
+        const req = pendingRequests.get(reqId);
+        if (!req) {
+            sendResponse({ error: 'Request context lost' });
+            return false;
+        }
+
+        const targetTabId = req.tabId;
+        if (targetTabId) {
+            console.log('[Magnee BG] Sending EXECUTE_TX to tab:', targetTabId);
+            chrome.tabs.sendMessage(targetTabId, {
+                type: 'MAGNEE_EXECUTE_TX',
+                payload: { tx, reqId }
+            }, (response) => {
+                if (chrome.runtime.lastError) {
+                    console.error('[Magnee BG] Failed to send to tab:', chrome.runtime.lastError);
+                    sendResponse({ error: 'Failed to contact tab: ' + chrome.runtime.lastError.message });
+                } else {
+                    console.log('[Magnee BG] Exec response:', response);
+                    sendResponse(response);
+                }
+            });
+            return true; // Async response pending from tab
+        } else {
+            sendResponse({ error: 'Target tab ID missing' });
+            return false;
+        }
     }
 });
 

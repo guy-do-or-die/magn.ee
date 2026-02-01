@@ -46,5 +46,23 @@
         }
     });
 
+    // Listen for EXECUTE_TX from Background (to bypass interception)
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        if (message.type === 'MAGNEE_EXECUTE_TX') {
+            console.log('[Magnee Content] Received MAGNEE_EXECUTE_TX from BG:', message.payload);
+            try {
+                window.postMessage({
+                    type: 'MAGNEE_EXECUTE_TX',
+                    payload: message.payload
+                }, '*');
+                console.log('[Magnee Content] Posted MAGNEE_EXECUTE_TX to window');
+                sendResponse({ status: 'sent_to_page' });
+            } catch (e) {
+                console.error('[Magnee Content] Failed to post message:', e);
+                sendResponse({ error: (e as Error).message });
+            }
+        }
+    });
+
     console.log('[Magnee] Content script loaded');
 })();

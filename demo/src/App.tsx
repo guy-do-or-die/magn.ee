@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useAccount, useConnect, useDisconnect, useBalance, useSendTransaction, useReadContract, useWaitForTransactionReceipt } from 'wagmi'
 import { parseEther, formatEther, encodeFunctionData } from 'viem'
-import { ROUTER_ADDRESS, DEMO_ADDRESS, ROUTER_ABI, DEMO_ABI } from './wagmi'
+import { ROUTER_ADDRESS, DEMO_ADDRESSES, DEMO_ADDRESS as DEFAULT_DEMO, ROUTER_ABI, DEMO_ABI } from './wagmi'
 import './App.css'
 
 function App() {
@@ -10,12 +10,16 @@ function App() {
   const { disconnect } = useDisconnect()
   const { data: balance } = useBalance({ address })
 
-  const [ethAmount, setEthAmount] = useState('0.01')
+  const [ethAmount, setEthAmount] = useState('0.0001') // Default smaller for real nets
   const [logs, setLogs] = useState<string[]>([])
   const [magneeActive, setMagneeActive] = useState(false)
 
+  // Dynamic Address Selection
+  const activeChainId = chain?.id || 31337
+  const currentDemoAddress = DEMO_ADDRESSES[activeChainId] || DEFAULT_DEMO
+
   const { data: totalDonations, refetch: refetchDonations } = useReadContract({
-    address: DEMO_ADDRESS,
+    address: currentDemoAddress,
     abi: DEMO_ABI,
     functionName: 'totalDonations',
   })
@@ -51,9 +55,9 @@ function App() {
   }, [isConfirmed, txHash])
 
   const directDonate = () => {
-    log(`Sending direct donation of ${ethAmount} ETH to PayableDemo...`)
+    log(`Sending direct donation of ${ethAmount} ETH to PayableDemo (${activeChainId})...`)
     sendTransaction({
-      to: DEMO_ADDRESS,
+      to: currentDemoAddress,
       value: parseEther(ethAmount),
       data: encodeFunctionData({
         abi: DEMO_ABI,
@@ -77,7 +81,7 @@ function App() {
       data: encodeFunctionData({
         abi: ROUTER_ABI,
         functionName: 'forward',
-        args: [DEMO_ADDRESS, innerCalldata],
+        args: [currentDemoAddress, innerCalldata],
       }),
     })
   }
@@ -97,8 +101,8 @@ function App() {
             <code>{ROUTER_ADDRESS}</code>
           </div>
           <div>
-            <label>PayableDemo</label>
-            <code>{DEMO_ADDRESS}</code>
+            <label>PayableDemo ({chain?.name || 'Local'})</label>
+            <code>{currentDemoAddress ? `${currentDemoAddress.slice(0, 10)}...` : 'N/A'}</code>
           </div>
         </div>
       </section>

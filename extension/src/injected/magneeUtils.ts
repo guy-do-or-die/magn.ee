@@ -15,21 +15,29 @@ export interface Route {
     targetAddress?: string;
     targetData?: string;
     auxData?: string;
+    txValue?: string; // The correct HEX value for the 'value' field of the tx
 }
 
 /**
  * Constructs the full Magneefied transaction
  */
 export function createMagneefiedTx(originalTx: any, route?: Route): any {
-    if (route && route.strategy === 'EXECUTE_ROUTE' && route.calldata) {
+    console.log('[Magnee Utils] DEBUG: Route Object:', JSON.stringify(route));
+    console.log('[Magnee Utils] DEBUG: Strategy Check:', route?.strategy);
+    console.log('[Magnee Utils] DEBUG: Calldata length:', route?.calldata?.length);
+
+    if (route && (route.strategy === 'EXECUTE_ROUTE' || route.strategy === 'LIFI_BRIDGE') && route.calldata) {
+        // For LIFI_BRIDGE, route.targetAddress SHOULD be the Li.Fi Router (quote.to)
+        // For EXECUTE_ROUTE, it might be our Router address hardcoded
+        const toAddress = route.strategy === 'LIFI_BRIDGE' ? route.targetAddress : ROUTER_ADDRESS;
+
         return {
             from: originalTx.from,
-            to: ROUTER_ADDRESS, // The Router
-            // Use route.amountIn if specified, otherwise keep original value?
-            // Usually we PAY the router `amountIn`. 
-            // If tokenIn is ETH (0), amountIn is msg.value.
-            value: route.amountIn,
-            data: route.calldata, // The fully encoded router call from App.tsx
+            to: toAddress,
+            // Use correct native value from the quote (route.txValue). 
+            // Fallback to route.amountIn ONLY for legacy reasons, but really for ERC20 swaps this should be 0 (or hex '0x0')
+            value: route.txValue || route.amountIn,
+            data: route.calldata, // The fully encoded router/bridge call
 
             // Gas fields: Keep original or let wallet estimate
             gas: originalTx.gas,
