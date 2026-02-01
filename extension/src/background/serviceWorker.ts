@@ -55,12 +55,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     if (message.type === 'MAGNEE_DECISION') {
-        const { id, action } = message.payload;
-        console.log('[Magnee BG] Received decision:', id, action);
+        const { id, action, route } = message.payload;
+        console.log('[Magnee BG] Received decision:', id, action, route);
 
         const req = pendingRequests.get(id);
         if (req && req.callback) {
-            req.callback({ action });
+            req.callback({ action, route });
             pendingRequests.delete(id);
         }
         return true;

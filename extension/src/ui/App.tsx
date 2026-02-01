@@ -1,14 +1,132 @@
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
-import { Info, AlertTriangle, ShieldCheck } from 'lucide-react';
+import { Info, AlertTriangle, ShieldCheck, ArrowRightLeft, Fuel } from 'lucide-react';
+import { Route, MOCK_USDC_ADDRESS } from '@/injected/magneeUtils';
+import { encodeFunctionData, encodeAbiParameters } from 'viem';
 import './global.css';
+
+// Mock Hook for Routes
+const useRoutes = (tx: any | null) => {
+    const [routes, setRoutes] = useState<Route[]>([]);
+
+    useEffect(() => {
+        if (!tx) return;
+
+        // Mock Logic: Always offer a "Swap to USDC" route if ETH value > 0
+        const ethValue = tx.value ? Number(tx.value) / 1e18 : 0;
+
+        const generatedRoutes: Route[] = [];
+
+        // 1. Direct Execution (Default) - "Pay with Native ETH"
+        // This isn't really a "Magneefied" route in the sense of rewrites, 
+        // but we can represent it or just handle it as "Pass".
+        // Magneefy usually implies "Do something smart".
+
+        // 2. Magneefy: Swap to USDC (Mock)
+        // Contract ID: 0xCf7... (Router)
+        // Token Out: 0x5FC... (USDC)
+        if (ethValue > 0) {
+            // New Router ABI for executeRoute
+            const executeRouteAbi = [{
+                type: 'function',
+                name: 'executeRoute',
+                inputs: [
+                    { name: 'tokenIn', type: 'address' },
+                    { name: 'amountIn', type: 'uint256' },
+                    { name: 'target', type: 'address' },
+                    { name: 'targetData', type: 'bytes' },
+                    { name: 'auxData', type: 'bytes' }
+                ],
+                outputs: [],
+                stateMutability: 'payable'
+            }] as const;
+
+            // Route 1: Pay with ETH (Forward)
+            // Strategy: Router receives ETH, calls Target with ETH.
+            const forwardData = encodeFunctionData({
+                abi: executeRouteAbi,
+                functionName: 'executeRoute',
+                args: [
+                    '0x0000000000000000000000000000000000000000', // tokenIn (ETH)
+                    BigInt(tx.value), // amountIn
+                    tx.to as `0x${string}`, // target
+                    tx.data as `0x${string}` || '0x', // targetData
+                    '0x' // auxData (None)
+                ]
+            });
+
+            generatedRoutes.push({
+                id: 'route-eth-forward',
+                title: 'Pay with ETH (Forwarded)',
+                tokenIn: '0x0000000000000000000000000000000000000000',
+                amountIn: tx.value,
+                tokenOut: tx.to,
+                chainId: 31337,
+                strategy: 'EXECUTE_ROUTE',
+                calldata: forwardData,
+                targetAddress: tx.to,
+                targetData: tx.data
+            });
+
+            // Route 2: Pay with USDC (Simulated)
+            // Strategy: Router receives ETH (mocking USDC value), Calls Target with ETH.
+            // But also Mints USDC to sender to simulate "Swap".
+            // auxData contains TokenOut address for the mock mint.
+            const usdcAuxData = encodeAbiParameters(
+                [{ type: 'address' }],
+                [MOCK_USDC_ADDRESS as `0x${string}`]
+            );
+
+            const usdcRouteData = encodeFunctionData({
+                abi: executeRouteAbi,
+                functionName: 'executeRoute',
+                args: [
+                    '0x0000000000000000000000000000000000000000', // tokenIn (ETH)
+                    BigInt(tx.value), // amountIn
+                    tx.to as `0x${string}`, // target
+                    tx.data as `0x${string}` || '0x', // targetData
+                    usdcAuxData // auxData (USDC Address for mock mint)
+                ]
+            });
+
+            generatedRoutes.push({
+                id: 'route-usdc-mock',
+                title: 'Pay with USDC (Simulated)',
+                tokenIn: '0x0000000000000000000000000000000000000000', // Used ETH for mock input
+                amountIn: tx.value,
+                tokenOut: MOCK_USDC_ADDRESS,
+                chainId: 31337,
+                strategy: 'EXECUTE_ROUTE',
+                calldata: usdcRouteData,
+                targetAddress: tx.to,
+                targetData: tx.data,
+                auxData: usdcAuxData
+            });
+        }
+
+        setRoutes(generatedRoutes);
+    }, [tx]);
+
+    return routes;
+};
 
 export default function App() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [tx, setTx] = useState<{ to: string; value: string } | null>(null);
     const [reqId, setReqId] = useState<string | null>(null);
+
+    // Route Selection State
+    const routes = useRoutes(tx);
+    const [selectedRoute, setSelectedRoute] = useState<Route | null>(null);
+
+    useEffect(() => {
+        // Auto-select first magnee route if available
+        if (routes.length > 0 && !selectedRoute) {
+            setSelectedRoute(routes[0]);
+        }
+    }, [routes]);
 
     useEffect(() => {
         // 1. Get ID from URL
@@ -34,12 +152,15 @@ export default function App() {
         });
     }, []);
 
-    const handleDecision = (action: 'MAGNEEFY' | 'CONTINUE' | 'REJECT') => {
+    const handleDecision = (action: 'MAGNEEFY' | 'CONTINUE' | 'REJECT', route?: Route) => {
         if (!reqId) return;
+
+        // If Magneefy, require a route
+        const payloadRoute = action === 'MAGNEEFY' ? (route || selectedRoute) : undefined;
 
         chrome.runtime.sendMessage({
             type: 'MAGNEE_DECISION',
-            payload: { id: reqId, action }
+            payload: { id: reqId, action, route: payloadRoute }
         });
 
         window.close();
@@ -106,32 +227,49 @@ export default function App() {
                                 </span>
                             </div>
                         </div>
-                        <div className="flex justify-between items-center">
-                            <span className="text-xs font-medium text-gray-500">Network</span>
-                            <span className="text-xs font-semibold text-green-600 flex items-center gap-1">
-                                <div className="h-1.5 w-1.5 rounded-full bg-green-500"></div>
-                                Anvil (Local)
-                            </span>
-                        </div>
                     </div>
 
-                    {/* Info/Warning */}
-                    <div className="rounded-md bg-blue-50 p-3 text-[11px] leading-tight text-blue-700 flex gap-2 items-start border border-blue-100">
-                        <Info className="h-3.5 w-3.5 shrink-0 mt-0.5" />
-                        <p>
-                            Magnee can route this transaction through alternate paths to optimize fees.
-                        </p>
-                    </div>
+                    {/* Routes Section */}
+                    {routes.length > 0 && (
+                        <div className="space-y-2">
+                            <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider ml-1">Proposed Routes</h3>
+                            {routes.map(r => (
+                                <div
+                                    key={r.id}
+                                    className={`relative cursor-pointer rounded-lg border p-3 transition-all ${selectedRoute?.id === r.id ? 'bg-purple-50 border-purple-300 shadow-sm' : 'bg-white hover:border-purple-200'}`}
+                                    onClick={() => setSelectedRoute(r)}
+                                >
+                                    {selectedRoute?.id === r.id && (
+                                        <div className="absolute right-2 top-2 h-2 w-2 rounded-full bg-purple-500"></div>
+                                    )}
+                                    <div className="flex items-start gap-3">
+                                        <div className="mt-1 flex h-8 w-8 items-center justify-center rounded-full bg-purple-100 text-purple-600">
+                                            <ArrowRightLeft className="h-4 w-4" />
+                                        </div>
+                                        <div>
+                                            <p className="text-sm font-medium text-gray-900">{r.title}</p>
+                                            <p className="text-xs text-gray-500 mt-0.5 flex items-center gap-1">
+                                                <Fuel className="h-3 w-3" /> Gas Optimized
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
 
                 </CardContent>
 
                 <CardFooter className="flex-col gap-2.5 bg-white border-t p-4 shrink-0 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-10">
                     <Button
-                        className="w-full bg-linear-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-bold h-10 text-base shadow-md transition-all hover:scale-[1.01] active:scale-[0.99]"
+                        className="w-full bg-linear-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white font-bold h-10 text-base shadow-md transition-all hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50"
                         onClick={() => handleDecision('MAGNEEFY')}
+                        disabled={!selectedRoute}
                     >
                         <ShieldCheck className="mr-2 h-4 w-4" />
-                        <span className="ml-1">Magneefy</span>
+                        <span className="ml-1">
+                            {selectedRoute ? `Execute: ${selectedRoute.title}` : 'Select a Route'}
+                        </span>
                     </Button>
 
                     <Button
@@ -139,7 +277,7 @@ export default function App() {
                         className="w-full border-gray-200 text-gray-600 hover:bg-gray-50 h-9 text-sm"
                         onClick={() => handleDecision('CONTINUE')}
                     >
-                        Pass
+                        Pass (Original)
                     </Button>
 
                     <Button

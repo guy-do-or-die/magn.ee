@@ -29,7 +29,8 @@
   "web_accessible_resources": [
     {
       "resources": [
-        "src/injected/providerWrapper.js"
+        "src/injected/providerWrapper.js",
+        "assets/*.js"
       ],
       "matches": [
         "<all_urls>"

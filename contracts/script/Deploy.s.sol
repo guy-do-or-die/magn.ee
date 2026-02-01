@@ -4,9 +4,13 @@ pragma solidity ^0.8.20;
 import "forge-std/Script.sol";
 import "../src/MagneeRouter.sol";
 import "../src/PayableDemo.sol";
+import "../src/MockUSDC.sol";
 
 contract DeployAllScript is Script {
-    function run() external returns (MagneeRouter router, PayableDemo demo) {
+    function run()
+        external
+        returns (MagneeRouter router, PayableDemo demo, MockUSDC usdc)
+    {
         uint256 deployerPrivateKey = vm.envOr(
             "PRIVATE_KEY",
             uint256(
@@ -18,9 +22,11 @@ contract DeployAllScript is Script {
 
         router = new MagneeRouter();
         demo = new PayableDemo();
+        usdc = new MockUSDC();
 
         console.log("MagneeRouter deployed at:", address(router));
         console.log("PayableDemo deployed at:", address(demo));
+        console.log("MockUSDC deployed at:", address(usdc));
 
         vm.stopBroadcast();
     }

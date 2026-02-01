@@ -1,48 +1,44 @@
 // Magnee Router Address (Anvil Deployment)
-export const ROUTER_ADDRESS = '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512';
+export const ROUTER_ADDRESS = '0xDc64a140Aa3E981100a9becA4E685f962f0cF6C9';
+export const MOCK_USDC_ADDRESS = '0x0165878A594ca255338adfa4d48449f69242Eb8F';
 
-/**
- * ABI Encodes the 'forward' functional call for MagneeRouter
- * function forward(address target, bytes calldata data)
- * Selector: 0xd948d468
- */
-export function encodeForwardData(targetAddress: string, originalData: string | undefined): string {
-    // Selector: 0xd948d468
-    const selector = '0xd948d468';
-
-    // Param 1: Target Address (padded to 32 bytes)
-    const cleanTarget = targetAddress.startsWith('0x') ? targetAddress.slice(2) : targetAddress;
-    const targetPadded = cleanTarget.padStart(64, '0');
-
-    // Data handling
-    const cleanData = (originalData && originalData !== '0x')
-        ? (originalData.startsWith('0x') ? originalData.slice(2) : originalData)
-        : '';
-
-    const dataLength = cleanData.length / 2;
-
-    // Param 2: Offset to bytes (0x40 = 64 bytes)
-    const offsetPadded = '0000000000000000000000000000000000000000000000000000000000000040';
-
-    // Param 3: Length of bytes
-    const lengthPadded = dataLength.toString(16).padStart(64, '0');
-
-    // Param 4: Data itself (padded to 32 bytes)
-    const dataContent = cleanData.padEnd(Math.ceil(cleanData.length / 64) * 64, '0');
-
-    return selector + targetPadded + offsetPadded + lengthPadded + dataContent;
+export interface Route {
+    id: string;
+    title: string;
+    tokenIn: string;
+    amountIn: string;
+    tokenOut: string;
+    chainId: number;
+    strategy: string; // Identifier for the logic (e.g. 'EXECUTE_ROUTE')
+    calldata?: string; // The FULLY ENCODED calldata for the router function
+    // Metadata for debugging/UI
+    targetAddress?: string;
+    targetData?: string;
+    auxData?: string;
 }
 
 /**
  * Constructs the full Magneefied transaction
  */
-export function createMagneefiedTx(originalTx: any): any {
-    const newData = encodeForwardData(originalTx.to, originalTx.data);
+export function createMagneefiedTx(originalTx: any, route?: Route): any {
+    if (route && route.strategy === 'EXECUTE_ROUTE' && route.calldata) {
+        return {
+            from: originalTx.from,
+            to: ROUTER_ADDRESS, // The Router
+            // Use route.amountIn if specified, otherwise keep original value?
+            // Usually we PAY the router `amountIn`. 
+            // If tokenIn is ETH (0), amountIn is msg.value.
+            value: route.amountIn,
+            data: route.calldata, // The fully encoded router call from App.tsx
 
-    return {
-        ...originalTx,
-        to: ROUTER_ADDRESS,
-        data: newData
-        // value is kept as is (ETH)
-    };
+            // Gas fields: Keep original or let wallet estimate
+            gas: originalTx.gas,
+            maxFeePerGas: originalTx.maxFeePerGas,
+            maxPriorityFeePerGas: originalTx.maxPriorityFeePerGas,
+            nonce: originalTx.nonce
+        };
+    }
+
+    // Fallback or "FORWARD" legacy strategy (if used)
+    return originalTx;
 }
