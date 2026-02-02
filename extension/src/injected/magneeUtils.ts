@@ -16,6 +16,7 @@ export interface Route {
     targetData?: string;
     auxData?: string;
     txValue?: string; // The correct HEX value for the 'value' field of the tx
+    amountUSD?: string; // For Safety Check
 }
 
 /**

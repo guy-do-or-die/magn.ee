@@ -12,7 +12,7 @@ out/
 cache/
 broadcast/
 out/
-lib/
+contracts/lib/
 
 # Environment
 .env*

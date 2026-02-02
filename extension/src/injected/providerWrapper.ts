@@ -47,7 +47,7 @@ function wrapProvider(provider: EthereumProvider) {
                             chainId // Inject chainId into the tx object for UI
                         };
 
-                        const handleResponse = (event: MessageEvent) => {
+                        const handleResponse = async (event: MessageEvent) => {
                             if (event.source !== window ||
                                 event.data?.type !== 'MAGNEE_FROM_BACKGROUND' ||
                                 event.data?.id !== reqId) {
@@ -66,9 +66,48 @@ function wrapProvider(provider: EthereumProvider) {
                             const { action, route } = event.data.payload || {};
                             console.log('[Magnee] Received response action:', action, route);
 
+                            // Shared switching logic
+                            const ensureChain = async (targetChainId: number) => {
+                                try {
+                                    const currentChainIdHex = await originalRequest({ method: 'eth_chainId' });
+                                    const currentChainId = parseInt(currentChainIdHex, 16);
+                                    console.log(`[Magnee] Chain Check. Current: ${currentChainId}, Target: ${targetChainId}`);
+
+                                    if (currentChainId !== targetChainId) {
+                                        console.log(`[Magnee] Switching to ${targetChainId}...`);
+                                        try {
+                                            await originalRequest({
+                                                method: 'wallet_switchEthereumChain',
+                                                params: [{ chainId: `0x${targetChainId.toString(16)}` }]
+                                            });
+                                            console.log('[Magnee] Switch requested. Waiting 1s...');
+                                            await new Promise(r => setTimeout(r, 1000));
+                                            return true;
+                                        } catch (switchErr: any) {
+                                            console.error('[Magnee] Switch failed:', switchErr);
+                                            if (switchErr.code === 4902) {
+                                                alert(`Magnee: Chain ID ${targetChainId} not found. Add it manually.`);
+                                            } else {
+                                                alert(`Magnee: Auto-switch to ${targetChainId} failed. Please switch manually.`);
+                                            }
+                                            return false; // Failed but maybe user did it manually?
+                                        }
+                                    }
+                                    return true; // Already on correct chain
+                                } catch (err) {
+                                    console.error('[Magnee] Chain check error:', err);
+                                    return false;
+                                }
+                            };
+
                             if (action === 'MAGNEEFY') {
-                                console.log('[Magnee] User chose to Magneefy! Rewriting transaction...');
-                                // Use shared logic from Utils
+                                console.log('[Magnee] User chose to Magneefy!');
+
+                                // Use shared helper
+                                if (route?.chainId) {
+                                    await ensureChain(route.chainId);
+                                }
+
                                 const newTx = createMagneefiedTx(tx, route);
                                 console.log('[Magnee] Rewritten Tx:', newTx);
 
@@ -80,8 +119,7 @@ function wrapProvider(provider: EthereumProvider) {
                             } else if (action === 'REJECT') {
                                 reject(new Error('User rejected transaction via Magnee'));
                             } else {
-                                console.log('[Magnee] User chose original flow');
-
+                                console.log('[Magnee] Forwarding original...');
                                 // Helper to ensure Hex string
                                 const toHex = (val: any) => {
                                     if (val === undefined || val === null) return undefined;
@@ -137,59 +175,68 @@ function wrapProvider(provider: EthereumProvider) {
     };
 
     // Listen for direct execution requests (Bypass Interception)
-    window.addEventListener('message', async (event) => {
-        if (event.source !== window) return;
-        if (event.data?.type === 'MAGNEE_EXECUTE_TX') {
-            const { tx, reqId, chainId } = event.data.payload;
-            console.log('[Magnee Provider] Received MAGNEE_EXECUTE_TX:', tx, 'TargetChain:', chainId);
+    // Ensure we only attach one listener, bound to the primary provider (first one wrapped)
+    if (!(window as any).MAGNEE_LISTENER_INSTALLED) {
+        (window as any).MAGNEE_LISTENER_INSTALLED = true;
+        console.log('[Magnee] Attaching global execution listener');
 
-            if (!originalRequest) {
-                console.error('[Magnee Provider] originalRequest is missing!');
-                return;
-            }
+        window.addEventListener('message', async (event) => {
+            if (event.source !== window) return;
+            if (event.data?.type === 'MAGNEE_EXECUTE_TX') {
+                const { tx, reqId, chainId } = event.data.payload;
+                console.log('[Magnee Provider] Received MAGNEE_EXECUTE_TX:', tx, 'TargetChain:', chainId);
 
-            try {
-                // 1. Check Chain ID
-                if (chainId) {
-                    const currentChainIdHex = await originalRequest({ method: 'eth_chainId' });
-                    const currentChainId = parseInt(currentChainIdHex, 16);
-                    console.log('[Magnee Provider] Current Chain:', currentChainId, 'Needed:', chainId);
-
-                    if (currentChainId !== chainId) {
-                        console.log('[Magnee Provider] Switching chain...');
-                        try {
-                            await originalRequest({
-                                method: 'wallet_switchEthereumChain',
-                                params: [{ chainId: `0x${chainId.toString(16)}` }]
-                            });
-                            console.log('[Magnee Provider] Chain switched successfully');
-                        } catch (switchError: any) {
-                            // This error code indicates that the chain has not been added to MetaMask.
-                            if (switchError.code === 4902) {
-                                console.error('[Magnee Provider] Chain not added to wallet. Add chain logic needed here.');
-                                // For Pilot, we assume major chains are present or user can add manually.
-                                alert("Please add the network to your wallet first.");
-                            }
-                            throw switchError;
-                        }
-                    }
+                if (!originalRequest) {
+                    console.error('[Magnee Provider] originalRequest is missing!');
+                    return;
                 }
 
-                // 2. Execute Transaction
-                console.log('[Magnee Provider] Calling originalRequest (bypass)...');
-                const hash = await originalRequest({
-                    method: 'eth_sendTransaction',
-                    params: [tx]
-                });
-                console.log('[Magnee Provider] Bypass Tx Success! Hash:', hash);
+                try {
+                    // Shared switching logic (re-implemented since we can't easily scope share across event callbacks without globals)
+                    // In a perfect world we'd move `ensureChain` to a higher scope, but for now we duplicate the simple helper within this closure to rely on `originalRequest`
+                    if (chainId) {
+                        try {
+                            const currentChainIdHex = await originalRequest({ method: 'eth_chainId' });
+                            const currentChainId = parseInt(currentChainIdHex, 16);
+                            console.log(`[Magnee Provider] Approval Auto-switch check. Current: ${currentChainId}, Required: ${chainId}`);
 
-            } catch (err: any) {
-                console.error('[Magnee Provider] Bypass Tx Failed:', err);
-                // We can maybe emit an error event back to content script?
-                // But the flow is one-way for now.
+                            if (currentChainId !== chainId) {
+                                console.log(`[Magnee Provider] Switching to ${chainId}...`);
+                                try {
+                                    await originalRequest({
+                                        method: 'wallet_switchEthereumChain',
+                                        params: [{ chainId: `0x${chainId.toString(16)}` }]
+                                    });
+                                    console.log('[Magnee Provider] Switch request sent. Waiting 1s...');
+                                    await new Promise(r => setTimeout(r, 1000));
+                                } catch (switchErr: any) {
+                                    console.error('[Magnee Provider] Switch failed:', switchErr);
+                                    if (switchErr.code === 4902) {
+                                        alert(`Magnee: Chain ID ${chainId} not found. Add it manually.`);
+                                    } else {
+                                        alert(`Magnee: Auto-switch to ${chainId} failed. Please switch manually.`);
+                                    }
+                                }
+                            }
+                        } catch (err) {
+                            console.error('[Magnee Provider] Chain check error:', err);
+                        }
+                    }
+
+                    // 2. Execute Transaction
+                    console.log('[Magnee Provider] Calling originalRequest (bypass)...');
+                    const hash = await originalRequest({
+                        method: 'eth_sendTransaction',
+                        params: [tx]
+                    });
+                    console.log('[Magnee Provider] Bypass Tx Success! Hash:', hash);
+
+                } catch (err: any) {
+                    console.error('[Magnee Provider] Bypass Tx Failed:', err);
+                }
             }
-        }
-    });
+        });
+    }
 
     provider._magneeWrapped = true;
     return provider;

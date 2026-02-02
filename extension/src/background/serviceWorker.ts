@@ -92,7 +92,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             console.log('[Magnee BG] Sending EXECUTE_TX to tab:', targetTabId);
             chrome.tabs.sendMessage(targetTabId, {
                 type: 'MAGNEE_EXECUTE_TX',
-                payload: { tx, reqId }
+                payload: {
+                    tx,
+                    reqId,
+                    chainId: message.payload.chainId // Forward the chainID!
+                }
             }, (response) => {
                 if (chrome.runtime.lastError) {
                     console.error('[Magnee BG] Failed to send to tab:', chrome.runtime.lastError);
