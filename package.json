@@ -7,14 +7,15 @@
     ],
     "scripts": {
         "dev": "concurrently \"bun run dev:ext\" \"bun run dev:demo\"",
-        "dev:all": "concurrently \"bun run anvil\" \"bun run dev:ext\" \"bun run dev:demo\"",
+        "dev:all": "concurrently \"bun run dev:ext\" \"bun run dev:demo\"",
         "dev:demo": "cd demo && bun run dev",
         "dev:ext": "cd extension && bun run watch",
         "build": "bun run build:ext && bun run build:demo",
         "build:ext": "cd extension && bun run build",
         "build:demo": "cd demo && bun run build",
-        "anvil": "anvil --host 0.0.0.0 --port 8545",
-        "deploy:chain": "source .env && cd contracts && forge script script/DeployDemo.s.sol --account default --broadcast --verify --rpc-url",
+        "delegate:deploy": "cd extension && bun --env-file=../.env scripts/deploy-delegate.ts",
+        "delegate:update": "cd extension && bun scripts/update-delegate-address.ts",
+        "verify:chain": "source .env && cd contracts && forge verify-contract --rpc-url",
         "test": "bun run test:ext && bun run test:contracts",
         "test:ext": "cd extension && bun test",
         "test:contracts": "cd contracts && forge test"

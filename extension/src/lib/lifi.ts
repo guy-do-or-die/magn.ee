@@ -64,34 +64,3 @@ export async function fetchLiFiQuote(params: LiFiQuoteRequest): Promise<LiFiQuot
 
     return response.json();
 }
-
-// Mock Quote for Anvil/Dev
-export function getMockQuote(originalTx: { to: string; value: string; data: string }): LiFiQuoteResponse {
-    return {
-        transactionRequest: {
-            data: originalTx.data, // In real world this would be the Li.Fi router call
-            to: originalTx.to,     // Real world: Li.Fi Diamond
-            value: originalTx.value,
-            gasLimit: '500000',
-            gasPrice: '1000000000',
-            chainId: 31337
-        },
-        estimate: {
-            fromAmount: originalTx.value, // User pays same amount in mock
-            toAmount: originalTx.value,
-            approvalAddress: originalTx.to
-        },
-        action: {
-            fromToken: {
-                address: '0x0000000000000000000000000000000000000000',
-                symbol: 'ETH',
-                decimals: 18
-            },
-            toToken: {
-                address: '0x0000000000000000000000000000000000000000',
-                symbol: 'ETH',
-                decimals: 18
-            }
-        }
-    };
-}

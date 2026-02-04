@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useAccount, useConnect, useDisconnect, useBalance, useSendTransaction, useReadContract, useWaitForTransactionReceipt } from 'wagmi'
 import { parseEther, formatEther, encodeFunctionData } from 'viem'
-import { ROUTER_ADDRESS, DEMO_ADDRESSES, DEMO_ADDRESS as DEFAULT_DEMO, ROUTER_ABI, DEMO_ABI } from './wagmi'
+import { DEMO_ADDRESSES, DEMO_ABI } from './wagmi'
 import './App.css'
 
 function App() {
@@ -16,7 +16,7 @@ function App() {
 
   // Dynamic Address Selection
   const activeChainId = chain?.id || 31337
-  const currentDemoAddress = DEMO_ADDRESSES[activeChainId] || DEFAULT_DEMO
+  const currentDemoAddress = DEMO_ADDRESSES[activeChainId]
 
   const { data: totalDonations, refetch: refetchDonations } = useReadContract({
     address: currentDemoAddress,
@@ -67,39 +67,15 @@ function App() {
     })
   }
 
-  const viaMagneeRouter = () => {
-    log(`Sending ${ethAmount} ETH via MagneeRouter.forward()...`)
-    const innerCalldata = encodeFunctionData({
-      abi: DEMO_ABI,
-      functionName: 'donate',
-      args: ['Via MagneeRouter'],
-    })
-
-    sendTransaction({
-      to: ROUTER_ADDRESS,
-      value: parseEther(ethAmount),
-      data: encodeFunctionData({
-        abi: ROUTER_ABI,
-        functionName: 'forward',
-        args: [currentDemoAddress, innerCalldata],
-      }),
-    })
-  }
-
   return (
     <div className="app">
       <header>
         <h1>🧲 Magnee Demo</h1>
-        <p className="subtitle">Testing with Anvil Local Blockchain</p>
       </header>
 
       <section className="card">
         <h2>📍 Contracts</h2>
         <div className="addresses">
-          <div>
-            <label>MagneeRouter</label>
-            <code>{ROUTER_ADDRESS}</code>
-          </div>
           <div>
             <label>PayableDemo ({chain?.name || 'Local'})</label>
             <code>{currentDemoAddress ? `${currentDemoAddress.slice(0, 10)}...` : 'N/A'}</code>
@@ -154,10 +130,7 @@ function App() {
 
         <div className="buttons">
           <button onClick={directDonate} disabled={!isConnected || isPending}>
-            {isPending ? 'Sending...' : '1. Direct Donate'}
-          </button>
-          <button onClick={viaMagneeRouter} disabled={!isConnected || isPending}>
-            {isPending ? 'Sending...' : '2. Via Router'}
+            {isPending ? 'Sending...' : 'Donate'}
           </button>
           <button onClick={() => refetchDonations()} className="secondary">
             Refresh Balance
