@@ -119,7 +119,7 @@ export function build7702Request(
     value: string; // hex string
     chainId: string; // hex string
     authorizationList: Array<{
-        contractAddress: Address;
+        address: Address; // Per EIP-7702 spec
         chainId: string; // hex string
     }>;
 } | null {
@@ -133,7 +133,7 @@ export function build7702Request(
         value: `0x${tx.value.toString(16)}`,
         chainId: `0x${chainId.toString(16)}`,
         authorizationList: [{
-            contractAddress: tx.delegateAddress,
+            address: tx.delegateAddress, // Per EIP-7702 spec
             chainId: `0x${chainId.toString(16)}`
         }]
     };

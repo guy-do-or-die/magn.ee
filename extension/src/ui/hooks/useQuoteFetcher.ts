@@ -49,6 +49,31 @@ export function useQuoteFetcher({ sourceChainId, sourceTokenAddress, tx }: UseQu
                 }]
             });
 
+            // Build approval tx if needed (for ERC20 tokens when approval address is present)
+            let approvalTx: { to: string; data: string } | undefined;
+            if (quote.estimate.approvalAddress && sourceTokenAddress !== ZERO_ADDRESS) {
+                // Encode ERC20 approve(spender, amount)
+                const { encodeFunctionData } = await import('viem');
+                approvalTx = {
+                    to: sourceTokenAddress,
+                    data: encodeFunctionData({
+                        abi: [{
+                            inputs: [
+                                { name: 'spender', type: 'address' },
+                                { name: 'amount', type: 'uint256' }
+                            ],
+                            name: 'approve',
+                            outputs: [{ name: '', type: 'bool' }],
+                            stateMutability: 'nonpayable',
+                            type: 'function'
+                        }],
+                        functionName: 'approve',
+                        args: [quote.estimate.approvalAddress as `0x${string}`, BigInt(quote.estimate.fromAmount)]
+                    })
+                };
+                console.log('[Magnee] Generated approvalTx for 7702 batch:', approvalTx.to);
+            }
+
             generatedRoutes.push({
                 id: 'route-lifi-real',
                 title: `Bridge via Li.Fi (${(Number(quote.estimate.fromAmount) / Math.pow(10, quote.action.fromToken.decimals)).toFixed(6)} ${quote.action.fromToken.symbol})`,
@@ -62,7 +87,8 @@ export function useQuoteFetcher({ sourceChainId, sourceTokenAddress, tx }: UseQu
                 targetData: tx.data,
                 auxData: '0x',
                 txValue: quote.transactionRequest.value,
-                amountUSD: quote.estimate.fromAmountUSD
+                amountUSD: quote.estimate.fromAmountUSD,
+                approvalTx  // Include for 7702 batching
             });
 
             setRoutes(generatedRoutes);

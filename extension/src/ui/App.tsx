@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 
@@ -6,15 +6,17 @@ import { PaymentRequestHeader } from './features/PaymentRequestHeader';
 import { QuoteConfigurator } from './features/QuoteConfigurator';
 import { QuoteList } from './features/QuoteList';
 import { QuoteReview } from './features/QuoteReview';
+import { ExecutionProgress, ExecutionStatus } from './features/ExecutionProgress';
 
 import { useQuoteFetcher } from './hooks/useQuoteFetcher';
 import { useApproval } from './hooks/useApproval';
+import { initLiFiSDK } from '@/lib/lifi';
 
 import { Route } from '@/injected/magneeUtils';
 import { ZERO_ADDRESS, DEFAULT_SOURCE_CHAIN_ID, SUPPORTED_CHAINS, POPULAR_TOKENS } from '@/lib/constants';
 import './global.css';
 
-type Step = 'CONFIG' | 'LOADING' | 'SELECT' | 'CONFIRM' | 'STATUS';
+type Step = 'CONFIG' | 'LOADING' | 'SELECT' | 'CONFIRM' | 'EXECUTING' | 'STATUS';
 
 export default function App() {
     const [loading, setLoading] = useState(true);
@@ -45,7 +47,54 @@ export default function App() {
 
     const [selectedRoute, setSelectedRoute] = useState<Route | null>(null);
 
-    // Initialize
+    // Execution tracking state
+    const [executionStatus, setExecutionStatus] = useState<ExecutionStatus>({
+        step: 0,
+        total: 0,
+        status: 'pending',
+        message: ''
+    });
+
+    // Original chain for restoration on close/back
+    const [originalChainId, setOriginalChainId] = useState<number | null>(null);
+
+    // Function to restore original chain
+    const restoreOriginalChain = useCallback(async () => {
+        if (originalChainId && window.ethereum) {
+            try {
+                await window.ethereum.request({
+                    method: 'wallet_switchEthereumChain',
+                    params: [{ chainId: `0x${originalChainId.toString(16)}` }]
+                });
+                console.log('[Magnee] Restored original chain:', originalChainId);
+            } catch (err) {
+                console.warn('[Magnee] Failed to restore chain:', err);
+            }
+        }
+    }, [originalChainId]);
+
+    // Initialize SDK and save original chain
+    useEffect(() => {
+        const init = async () => {
+            // Save original chain for restoration
+            if (window.ethereum) {
+                try {
+                    const chainIdHex = await window.ethereum.request({ method: 'eth_chainId' });
+                    const chainId = parseInt(chainIdHex as string, 16);
+                    setOriginalChainId(chainId);
+                    console.log('[Magnee] Saved original chain:', chainId);
+
+                    // Initialize Li.Fi SDK
+                    initLiFiSDK(window.ethereum);
+                } catch (err) {
+                    console.warn('[Magnee] Failed to get chain:', err);
+                }
+            }
+        };
+        init();
+    }, []);
+
+    // Load TX details
     useEffect(() => {
         const queryParams = new URLSearchParams(window.location.search);
         const id = queryParams.get('id');
@@ -109,11 +158,21 @@ export default function App() {
         setSelectedRoute(r);
         setStep('CONFIRM');
 
-        // Check Approval Logic
+        // Check Approval Logic - skip if 7702 batching is available
         if (tx && tx.from && r.strategy === 'LIFI_BRIDGE') {
-            const hasAllowance = await checkAllowance(r.tokenIn, tx.from, r.targetAddress || '', BigInt(r.amountIn));
-            setNeedsApproval(!hasAllowance);
-            console.log('[Magnee] Route Selection - Needs Approval?', !hasAllowance);
+            // Import delegation check
+            const { supportsDelegation } = await import('@/lib/delegates');
+            
+            // If chain supports 7702 AND we have approvalTx, we'll batch it - no separate approval needed
+            if (r.approvalTx && supportsDelegation(r.chainId)) {
+                console.log('[Magnee] 7702 batching available - skipping separate approval step');
+                setNeedsApproval(false);
+            } else {
+                // Standard flow: check allowance and prompt for approval if needed
+                const hasAllowance = await checkAllowance(r.tokenIn, tx.from, r.targetAddress || '', BigInt(r.amountIn));
+                setNeedsApproval(!hasAllowance);
+                console.log('[Magnee] Route Selection - Needs Approval?', !hasAllowance);
+            }
         } else {
             setNeedsApproval(false);
         }
@@ -185,7 +244,7 @@ export default function App() {
                         <QuoteList
                             routes={routes}
                             onSelectRoute={handleSelectRoute}
-                            onBack={() => setStep('CONFIG')}
+                            onBack={() => { restoreOriginalChain(); setStep('CONFIG'); }}
                         />
                     )}
 
@@ -197,25 +256,22 @@ export default function App() {
                             approving={approving}
                             onApprove={handleApprove}
                             onConfirm={() => handleDecision('MAGNEEFY')}
-                            onBack={() => setStep('SELECT')}
+                            onBack={() => { restoreOriginalChain(); setStep('SELECT'); }}
                         />
                     )}
 
                     {step === 'STATUS' && (
                         <div className="flex flex-col items-center justify-center py-8 space-y-4 text-center">
-                            <div className="bg-green-100 p-4 rounded-full">
-                                <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                </svg>
-                            </div>
+                            <ExecutionProgress status={executionStatus} />
                             <div>
-                                <h3 className="text-lg font-bold text-gray-900">Check your Wallet</h3>
-                                <p className="text-sm text-gray-500 mt-1">Please sign the transaction in your wallet to proceed.</p>
-                                <p className="text-xs text-gray-400 mt-4">
-                                    If the route requires a different chain,<br />Magnee has requested a switch.
-                                </p>
+                                <h3 className="text-lg font-bold text-gray-900">
+                                    {executionStatus.status === 'done' ? 'Complete!' : 'Check your Wallet'}
+                                </h3>
+                                {executionStatus.status !== 'done' && (
+                                    <p className="text-sm text-gray-500 mt-1">Please sign the transaction in your wallet to proceed.</p>
+                                )}
                             </div>
-                            <Button onClick={() => window.close()} variant="outline" className="mt-4">
+                            <Button onClick={() => { restoreOriginalChain(); window.close(); }} variant="outline" className="mt-4">
                                 Close
                             </Button>
                         </div>

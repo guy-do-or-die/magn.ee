@@ -27,8 +27,86 @@ export interface Route {
 }
 
 /**
+ * ERC-5792 Call structure for wallet_sendCalls
+ */
+export interface ERC5792Call {
+    to: string;
+    value?: string; // hex
+    data?: string; // hex
+}
+
+/**
+ * Build ERC-5792 wallet_sendCalls request
+ * This is the wallet-agnostic way to batch transactions.
+ * The wallet decides whether to use 7702, 4337, or native batching.
+ */
+export function buildWalletSendCalls(
+    fromAddress: string,
+    chainId: number,
+    route: Route
+): { method: string; params: any[] } | null {
+    const calls: ERC5792Call[] = [];
+    
+    // Add approval call if present
+    if (route.approvalTx) {
+        calls.push({
+            to: route.approvalTx.to,
+            value: '0x0',
+            data: route.approvalTx.data
+        });
+        console.log('[Magnee Utils] ERC-5792: Added approval call');
+    }
+    
+    // Add main bridge/swap call
+    if (route.calldata && route.targetAddress) {
+        calls.push({
+            to: route.targetAddress,
+            value: route.txValue || '0x0',
+            data: route.calldata
+        });
+        console.log('[Magnee Utils] ERC-5792: Added main call');
+    }
+    
+    if (calls.length === 0) {
+        console.log('[Magnee Utils] ERC-5792: No calls to batch');
+        return null;
+    }
+    
+    console.log('[Magnee Utils] ERC-5792: Building wallet_sendCalls with', calls.length, 'calls');
+    
+    return {
+        method: 'wallet_sendCalls',
+        params: [{
+            version: '1.0',
+            chainId: `0x${chainId.toString(16)}`,
+            from: fromAddress,
+            calls: calls,
+            capabilities: {
+                // Request atomic execution if possible
+                atomicBatch: {
+                    supported: true
+                }
+            }
+        }]
+    };
+}
+
+/**
+ * Check if wallet supports ERC-5792 capabilities
+ */
+export function buildGetCapabilities(fromAddress: string): { method: string; params: any[] } {
+    return {
+        method: 'wallet_getCapabilities',
+        params: [fromAddress]
+    };
+}
+
+/**
  * Create a 7702 batch transaction (approval + main call)
  * Returns null if 7702 not supported on this chain
+ * 
+ * NOTE: This is a FALLBACK approach. ERC-5792 wallet_sendCalls is preferred
+ * because it lets the wallet decide how to batch, avoiding security warnings.
  */
 export function create7702BatchTx(originalTx: any, route: Route): any | null {
     const chainId = route.chainId;
@@ -94,7 +172,7 @@ export function create7702BatchTx(originalTx: any, route: Route): any | null {
         // EIP-7702 specific fields
         type: '0x04', // EIP-7702 transaction type
         authorizationList: [{
-            contractAddress: delegateAddress,
+            address: delegateAddress, // Per EIP-7702 spec: use 'address' not 'contractAddress'
             chainId: `0x${chainId.toString(16)}`
         }]
     };
@@ -102,7 +180,7 @@ export function create7702BatchTx(originalTx: any, route: Route): any | null {
 
 /**
  * Constructs the full Magneefied transaction
- * Tries 7702 first, falls back to standard tx
+ * Priority: ERC-5792 > 7702 > standard single tx
  */
 export function createMagneefiedTx(originalTx: any, route?: Route): any {
     console.log('[Magnee Utils] DEBUG: Route Object:', JSON.stringify(route));
@@ -110,29 +188,26 @@ export function createMagneefiedTx(originalTx: any, route?: Route): any {
     console.log('[Magnee Utils] DEBUG: Calldata length:', route?.calldata?.length);
 
     if (route && (route.strategy === 'EXECUTE_ROUTE' || route.strategy === 'LIFI_BRIDGE') && route.calldata) {
-        // Try 7702 batch first (if approval is needed or chain supports it)
-        if (route.approvalTx || supportsDelegation(route.chainId)) {
-            const tx7702 = create7702BatchTx(originalTx, route);
-            if (tx7702) {
-                console.log('[Magnee Utils] Using 7702 batch transaction');
-                return tx7702;
-            }
+        // If there's an approval tx, we need batching
+        // Flag this for the caller to know we need ERC-5792 or 7702
+        if (route.approvalTx) {
+            console.log('[Magnee Utils] Route has approval tx - batching required');
+            // Return special marker for the caller to use ERC-5792
+            return {
+                _requiresBatching: true,
+                _route: route,
+                _originalTx: originalTx
+            };
         }
         
-        // Fallback to standard Li.Fi transaction
-        // For LIFI_BRIDGE, route.targetAddress SHOULD be the Li.Fi Router (quote.to)
-        // For EXECUTE_ROUTE, it might be our Router address hardcoded
+        // No approval needed - just use standard Li.Fi transaction
         const toAddress = route.strategy === 'LIFI_BRIDGE' ? route.targetAddress : ROUTER_ADDRESS;
 
         return {
             from: originalTx.from,
             to: toAddress,
-            // Use correct native value from the quote (route.txValue). 
-            // Fallback to route.amountIn ONLY for legacy reasons, but really for ERC20 swaps this should be 0 (or hex '0x0')
             value: route.txValue || route.amountIn,
-            data: route.calldata, // The fully encoded router/bridge call
-
-            // Gas fields: Keep original or let wallet estimate
+            data: route.calldata,
             gas: originalTx.gas,
             maxFeePerGas: originalTx.maxFeePerGas,
             maxPriorityFeePerGas: originalTx.maxPriorityFeePerGas,
@@ -144,3 +219,27 @@ export function createMagneefiedTx(originalTx: any, route?: Route): any {
     return originalTx;
 }
 
+/**
+ * Get the calls array for ERC-5792 or sequential execution
+ */
+export function getCallsFromRoute(route: Route): ERC5792Call[] {
+    const calls: ERC5792Call[] = [];
+    
+    if (route.approvalTx) {
+        calls.push({
+            to: route.approvalTx.to,
+            value: '0x0',
+            data: route.approvalTx.data
+        });
+    }
+    
+    if (route.calldata && route.targetAddress) {
+        calls.push({
+            to: route.targetAddress,
+            value: route.txValue || '0x0',
+            data: route.calldata
+        });
+    }
+    
+    return calls;
+}
