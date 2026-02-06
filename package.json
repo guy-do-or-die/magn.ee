@@ -3,13 +3,16 @@
     "private": true,
     "workspaces": [
         "demo",
-        "extension"
+        "extension",
+        "web"
     ],
     "scripts": {
         "dev": "concurrently \"bun run dev:ext\" \"bun run dev:demo\"",
         "dev:all": "concurrently \"bun run dev:ext\" \"bun run dev:demo\"",
         "dev:demo": "cd demo && bun run dev",
         "dev:ext": "cd extension && bun run watch",
+        "dev:web": "cd web && bun run dev",
+        "build:web": "cd web && bun run build",
         "build": "bun run build:ext && bun run build:demo",
         "build:ext": "cd extension && bun run build",
         "build:demo": "cd demo && bun run build",

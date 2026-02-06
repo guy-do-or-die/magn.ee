@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="24 40 432 400" width="64" height="64">
+  <defs>
+    <path id="leftU" d="M 34,380 L 34,180 A 120,120 0 0 1 274,180 L 274,380 L 206,380 L 206,180 A 52,52 0 0 0 102,180 L 102,380 Z"/>
+    <path id="rightU" d="M 206,380 L 206,180 A 120,120 0 0 1 446,180 L 446,380 L 378,380 L 378,180 A 52,52 0 0 0 274,180 L 274,380 Z"/>
+
+    <clipPath id="LU-left"><rect x="0" y="0" width="154" height="440"/></clipPath>
+    <clipPath id="LU-right"><rect x="154" y="0" width="326" height="440"/></clipPath>
+    <clipPath id="RU-left"><rect x="0" y="0" width="326" height="440"/></clipPath>
+    <clipPath id="RU-right"><rect x="326" y="0" width="154" height="440"/></clipPath>
+  </defs>
+
+  <!-- Same geometry, square viewBox for favicon -->
+  <use href="#leftU" fill="#2563EB" clip-path="url(#LU-left)"/>
+  <use href="#leftU" fill="#EF4444" clip-path="url(#LU-right)"/>
+  <use href="#rightU" fill="#EF4444" clip-path="url(#RU-left)"/>
+  <use href="#rightU" fill="#2563EB" clip-path="url(#RU-right)"/>
+
+  <rect x="34" y="380" width="68" height="48" fill="#94A3B8"/>
+  <rect x="206" y="380" width="68" height="48" fill="#94A3B8"/>
+  <rect x="378" y="380" width="68" height="48" fill="#94A3B8"/>
+</svg>

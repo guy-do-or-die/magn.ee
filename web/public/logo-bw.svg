@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 440" width="480" height="440">
+  <defs>
+    <linearGradient id="dark" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2D2D2D"/>
+      <stop offset="100%" stop-color="#1A1A1A"/>
+    </linearGradient>
+    <linearGradient id="mid" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#5A5A5A"/>
+      <stop offset="100%" stop-color="#444"/>
+    </linearGradient>
+    <linearGradient id="tip" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#999"/>
+      <stop offset="100%" stop-color="#777"/>
+    </linearGradient>
+
+    <path id="leftU" d="M 34,380 L 34,180 A 120,120 0 0 1 274,180 L 274,380 L 206,380 L 206,180 A 52,52 0 0 0 102,180 L 102,380 Z"/>
+    <path id="rightU" d="M 206,380 L 206,180 A 120,120 0 0 1 446,180 L 446,380 L 378,380 L 378,180 A 52,52 0 0 0 274,180 L 274,380 Z"/>
+
+    <clipPath id="LU-left"><rect x="0" y="0" width="154" height="440"/></clipPath>
+    <clipPath id="LU-right"><rect x="154" y="0" width="326" height="440"/></clipPath>
+    <clipPath id="RU-left"><rect x="0" y="0" width="326" height="440"/></clipPath>
+    <clipPath id="RU-right"><rect x="326" y="0" width="154" height="440"/></clipPath>
+  </defs>
+
+  <!-- Left: dark left, mid right -->
+  <use href="#leftU" fill="url(#dark)" clip-path="url(#LU-left)"/>
+  <use href="#leftU" fill="url(#mid)" clip-path="url(#LU-right)"/>
+  <!-- Right (flipped): mid left, dark right -->
+  <use href="#rightU" fill="url(#mid)" clip-path="url(#RU-left)"/>
+  <use href="#rightU" fill="url(#dark)" clip-path="url(#RU-right)"/>
+
+  <rect x="34" y="380" width="68" height="48" fill="url(#tip)"/>
+  <rect x="206" y="380" width="68" height="48" fill="url(#tip)"/>
+  <rect x="378" y="380" width="68" height="48" fill="url(#tip)"/>
+</svg>
