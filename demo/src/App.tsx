@@ -1,8 +1,224 @@
 import { useState, useEffect } from 'react'
-import { useAccount, useConnect, useDisconnect, useBalance, useSendTransaction, useReadContract, useWaitForTransactionReceipt } from 'wagmi'
+import { useAccount, useConnect, useDisconnect, useBalance, useSendTransaction, useReadContract, useWaitForTransactionReceipt, useWalletClient } from 'wagmi'
 import { parseEther, formatEther, encodeFunctionData } from 'viem'
 import { DEMO_ADDRESSES, DELEGATE_ADDRESSES, DEMO_ABI, explorerAddress } from './wagmi'
 import './App.css'
+
+// RPC URLs for checking delegation status
+const RPC_URLS: Record<number, string> = {
+  10: 'https://mainnet.optimism.io',
+  8453: 'https://mainnet.base.org',
+  42161: 'https://arb1.arbitrum.io/rpc',
+}
+
+function DelegationSection({
+  address,
+  chainId,
+  delegateAddress,
+  log,
+}: {
+  address: `0x${string}`
+  chainId: number
+  delegateAddress?: `0x${string}`
+  log: (msg: string) => void
+}) {
+  const [delegationState, setDelegationState] = useState<'checking' | 'delegated' | 'delegated_other' | 'not_delegated' | 'error'>('checking')
+  const [delegatedTo, setDelegatedTo] = useState<string | null>(null)
+  const [pending, setPending] = useState(false)
+  const { data: walletClient } = useWalletClient()
+
+  // Check delegation status via direct RPC
+  useEffect(() => {
+    const rpc = RPC_URLS[chainId]
+    if (!rpc || !address) return
+
+    setDelegationState('checking')
+    fetch(rpc, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0', id: 1,
+        method: 'eth_getCode',
+        params: [address, 'latest'],
+      }),
+    })
+      .then(r => r.json())
+      .then(data => {
+        const code = data.result
+        if (!code || code === '0x' || code.length < 48) {
+          setDelegationState('not_delegated')
+          setDelegatedTo(null)
+        } else {
+          const to = '0x' + code.slice(8).toLowerCase()
+          if (delegateAddress && to === delegateAddress.toLowerCase()) {
+            setDelegationState('delegated')
+          } else {
+            setDelegationState('delegated_other')
+            setDelegatedTo(to)
+          }
+        }
+      })
+      .catch(() => setDelegationState('error'))
+  }, [address, chainId, delegateAddress])
+
+  async function sendDelegation(targetAddress: string, action: string) {
+    if (!walletClient) {
+      log(`❌ No wallet client available`)
+      return
+    }
+    setPending(true)
+    const hexChainId = `0x${chainId.toString(16)}`
+    const isRevoke = targetAddress === '0x0000000000000000000000000000000000000000'
+
+    // Step 0: Check wallet capabilities
+    try {
+      log(`🔍 [${action}] Checking wallet_getCapabilities...`)
+      const provider = (window as any).ethereum
+      const caps = await provider.request({
+        method: 'wallet_getCapabilities',
+        params: [address],
+      })
+      log(`📋 [${action}] Capabilities: ${JSON.stringify(caps).slice(0, 200)}`)
+    } catch (e: any) {
+      log(`⚠️ [${action}] wallet_getCapabilities not supported: ${e?.message?.slice(0, 80)}`)
+    }
+
+    // Method 1: wallet_sendCalls with delegation: true (ERC-5792 standard format)
+    try {
+      log(`📤 [${action}] M1: wallet_sendCalls {delegation: true}...`)
+      const provider = (window as any).ethereum
+      const result = await provider.request({
+        method: 'wallet_sendCalls',
+        params: [{
+          version: '1',
+          chainId: hexChainId,
+          from: address,
+          calls: [{ to: address, value: '0x0', data: '0x' }],
+          capabilities: {
+            delegation: true,
+          }
+        }]
+      })
+      log(`✅ [${action}] M1 succeeded: ${JSON.stringify(result)}`)
+      setPending(false)
+      return
+    } catch (e: any) {
+      log(`⚠️ [${action}] M1 failed: ${e?.message?.slice(0, 120)}`)
+    }
+
+    // Method 2: wallet_sendCalls with delegation as contract address (chain-scoped)
+    try {
+      log(`📤 [${action}] M2: wallet_sendCalls {delegation: "${targetAddress.slice(0, 10)}..."}...`)
+      const provider = (window as any).ethereum
+      const result = await provider.request({
+        method: 'wallet_sendCalls',
+        params: [{
+          version: '1',
+          chainId: hexChainId,
+          from: address,
+          calls: [{ to: address, value: '0x0', data: '0x' }],
+          capabilities: {
+            [hexChainId]: {
+              delegation: targetAddress,
+            }
+          }
+        }]
+      })
+      log(`✅ [${action}] M2 succeeded: ${JSON.stringify(result)}`)
+      setPending(false)
+      return
+    } catch (e: any) {
+      log(`⚠️ [${action}] M2 failed: ${e?.message?.slice(0, 120)}`)
+    }
+
+    // Method 3: eth_sendTransaction type 0x04 with authorizationList
+    try {
+      log(`📤 [${action}] M3: eth_sendTransaction type 0x04...`)
+      const provider = (window as any).ethereum
+      const result = await provider.request({
+        method: 'eth_sendTransaction',
+        params: [{
+          type: '0x04',
+          from: address,
+          to: address,
+          value: '0x0',
+          data: '0x',
+          authorizationList: [{
+            address: targetAddress,
+            chainId: hexChainId,
+          }]
+        }]
+      })
+      log(`✅ [${action}] M3 succeeded: ${result}`)
+      setPending(false)
+      return
+    } catch (e: any) {
+      log(`❌ [${action}] M3 failed: ${e?.message?.slice(0, 120)}`)
+    }
+
+    // Method 4: Try with ORIGINAL provider (bypass Magnee wrapper)
+    try {
+      log(`📤 [${action}] M4: eth_sendTransaction (bypass wrapper)...`)
+      const originals = (window as any).__magneeOriginalProviders
+      const provider = originals?.[0] || (window as any).ethereum
+      const result = await provider.request({
+        method: 'eth_sendTransaction',
+        params: [{
+          type: '0x04',
+          from: address,
+          to: address,
+          value: '0x0',
+          data: '0x',
+          authorizationList: [{
+            address: targetAddress,
+            chainId: hexChainId,
+          }]
+        }]
+      })
+      log(`✅ [${action}] M4 succeeded: ${result}`)
+      setPending(false)
+      return
+    } catch (e: any) {
+      log(`❌ [${action}] M4 failed: ${e?.message?.slice(0, 120)}`)
+    }
+
+    log(`💀 [${action}] All methods failed. Wallet does not support dapp-initiated EIP-7702.`)
+    setPending(false)
+  }
+
+  const statusLabel = {
+    checking: '⏳ Checking...',
+    delegated: '✅ Delegated to Magnee',
+    delegated_other: `⚠️ Delegated to other: ${delegatedTo?.slice(0, 10)}...`,
+    not_delegated: '— Not delegated',
+    error: '❌ Check failed',
+  }
+
+  return (
+    <div>
+      <p><strong>Status:</strong> {statusLabel[delegationState]}</p>
+      <div className="buttons" style={{ marginTop: '8px' }}>
+        {delegateAddress && delegationState === 'not_delegated' && (
+          <button
+            onClick={() => sendDelegation(delegateAddress, 'Delegate')}
+            disabled={pending}
+          >
+            {pending ? 'Sending...' : `Delegate to Magnee`}
+          </button>
+        )}
+        {(delegationState === 'delegated' || delegationState === 'delegated_other') && (
+          <button
+            onClick={() => sendDelegation('0x0000000000000000000000000000000000000000', 'Revoke')}
+            disabled={pending}
+            className="secondary"
+          >
+            {pending ? 'Sending...' : 'Revoke Delegation'}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
 
 function App() {
   const { address, isConnected, chain } = useAccount()
@@ -157,6 +373,19 @@ function App() {
 
         {isConfirming && <p className="pending">⏳ Confirming transaction...</p>}
       </section>
+
+      {/* 7702 Delegation Section */}
+      {isConnected && (
+        <section className="card">
+          <h2>🔗 EIP-7702 Delegation</h2>
+          <DelegationSection
+            address={address!}
+            chainId={activeChainId}
+            delegateAddress={currentDelegateAddress}
+            log={log}
+          />
+        </section>
+      )}
 
       <section className="card">
         <h2>📋 Log</h2>

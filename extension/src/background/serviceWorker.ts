@@ -145,6 +145,35 @@ function executeWalletRPC(tabId: number, method: string, params: any[], sendResp
         world: 'MAIN',
         args: [method, params],
         func: async (method: string, params: any[]) => {
+            // 1. Try the active provider (set by providerWrapper when accounts are detected)
+            // @ts-ignore
+            const active = window.__magneeActiveProvider;
+            if (active) {
+                try {
+                    const result = await active.request({ method, params });
+                    return { ok: true, result };
+                } catch (e: any) {
+                    return { ok: false, error: e?.message ?? String(e) };
+                }
+            }
+
+            // 2. Try all providers cached by providerWrapper
+            // @ts-ignore
+            const providers = window.__magneeProviders || [];
+            for (const p of providers) {
+                try {
+                    const accounts = await p.request({ method: 'eth_accounts' });
+                    if (accounts && accounts.length > 0) {
+                        // Found a connected provider, mark it as active for future calls
+                        // @ts-ignore
+                        window.__magneeActiveProvider = p;
+                        const result = await p.request({ method, params });
+                        return { ok: true, result };
+                    }
+                } catch {}
+            }
+
+            // 3. Fallback: window.ethereum
             // @ts-ignore
             if (!window.ethereum) return { ok: false, error: 'No wallet on this page' };
             try {

@@ -39,6 +39,11 @@ function wrapProvider(provider: EthereumProvider): EthereumProvider {
 
     const originalRequest: RequestFn = provider.request.bind(provider);
 
+    // Store original request for debugging (bypass wrapper)
+    const originals = (window as any).__magneeOriginalProviders || [];
+    originals.push({ request: originalRequest, provider });
+    (window as any).__magneeOriginalProviders = originals;
+
     // Override request method
     provider.request = async function (args: { method: string; params?: any[] }) {
         console.log('[Magnee] Intercepted request:', args);
@@ -47,6 +52,12 @@ function wrapProvider(provider: EthereumProvider): EthereumProvider {
         if (args.method === 'eth_sendTransaction') {
             const tx = args.params?.[0];
             
+            // Pass through EIP-7702 delegation/revocation transactions
+            if (tx?.type === '0x04') {
+                console.log('[Magnee] 7702 tx — passing through');
+                return originalRequest(args);
+            }
+
             try {
                 // Check if this is a payable transaction
                 if (tx && tx.value && BigInt(tx.value) > 0n) {
@@ -61,13 +72,28 @@ function wrapProvider(provider: EthereumProvider): EthereumProvider {
         }
 
         // Forward all other requests unchanged
-        return originalRequest(args);
+        const result = await originalRequest(args);
+
+        // Track which provider has accounts → mark as active for Settings relay
+        if ((args.method === 'eth_accounts' || args.method === 'eth_requestAccounts') 
+            && Array.isArray(result) && result.length > 0) {
+            (window as any).__magneeActiveProvider = provider;
+        }
+
+        return result;
     };
 
     // Install direct execution listener (once globally)
     installDirectExecutionListener(originalRequest);
 
     provider._magneeWrapped = true;
+
+    // Store wrapped providers globally so the Settings relay can find them
+    if (!(window as any).__magneeProviders) (window as any).__magneeProviders = [];
+    if (!(window as any).__magneeProviders.includes(provider)) {
+        (window as any).__magneeProviders.push(provider);
+    }
+
     return provider;
 }
 
@@ -147,6 +173,13 @@ window.addEventListener('eip6963:announceProvider', ((event: CustomEvent) => {
     if (provider && !provider._magneeWrapped) {
         console.log('[Magnee] EIP-6963 provider announced:', event.detail.info.name);
         wrapProvider(provider);
+        // Proactively check if this provider has accounts → mark as active
+        provider.request({ method: 'eth_accounts' }).then((accs: string[]) => {
+            if (accs && accs.length > 0) {
+                (window as any).__magneeActiveProvider = provider;
+                console.log('[Magnee] Active provider set:', event.detail.info.name, accs[0]);
+            }
+        }).catch(() => {});
     }
 }) as EventListener);
 

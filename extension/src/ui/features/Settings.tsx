@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import delegateAddresses from '@/lib/delegates.json';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { requestAccounts, getAccounts, walletRequest, switchChain } from '@/lib/walletBridge';
+import { getAccounts, walletRequest, switchChain } from '@/lib/walletBridge';
 
 // Chain configuration with RPC URLs for on-chain checks
 const SUPPORTED_CHAINS = [
@@ -11,89 +11,36 @@ const SUPPORTED_CHAINS = [
     { id: 42161, name: 'Arbitrum', color: 'bg-cyan-500', rpc: 'https://arb1.arbitrum.io/rpc' },
 ];
 
-type DelegationState = 'unknown' | 'pending' | 'delegated' | 'not_delegated';
+type DelegationState = 'unknown' | 'pending' | 'delegated' | 'delegated_other' | 'not_delegated';
+
+interface ChainDelegation {
+    state: DelegationState;
+    delegatedTo?: string; // address if delegated_other
+}
 
 interface DelegationStatus {
-    [chainId: number]: DelegationState;
+    [chainId: number]: ChainDelegation;
 }
 
 export function Settings() {
-    const [walletConnected, setWalletConnected] = useState(false);
     const [walletAddress, setWalletAddress] = useState<string | null>(null);
     const [delegationStatus, setDelegationStatus] = useState<DelegationStatus>({});
     const [pendingChain, setPendingChain] = useState<number | null>(null);
+
     const [error, setError] = useState<string | null>(null);
-
-    useEffect(() => {
-        checkWalletConnection();
-    }, []);
-
-    async function checkWalletConnection() {
-        try {
-            const result = await getAccounts();
-            if (result.ok && result.result && result.result.length > 0) {
-                setWalletAddress(result.result[0]);
-                setWalletConnected(true);
-                // Check on-chain delegation status for all chains
-                checkAllChainsDelegation(result.result[0]);
-                setError(null);
-            }
-        } catch (err) {
-            console.error('Failed to check wallet:', err);
-        }
-    }
-
-    async function connectWallet() {
-        try {
-            setError(null);
-            const result = await requestAccounts();
-            
-            if (result.ok && result.result && result.result.length > 0) {
-                setWalletAddress(result.result[0]);
-                setWalletConnected(true);
-                checkAllChainsDelegation(result.result[0]);
-            } else if (!result.ok) {
-                setError(result.error || 'Failed to connect wallet');
-            }
-        } catch (err: any) {
-            console.error('Failed to connect wallet:', err);
-            setError(err.message || 'Failed to connect wallet');
-        }
-    }
+    const [loading, setLoading] = useState(true);
 
     /**
-     * Check delegation status on all supported chains
-     * Uses eth_getCode to detect if EOA has delegated code (7702)
+     * Check if address has 7702 delegation on a specific chain via direct RPC
      */
-    async function checkAllChainsDelegation(address: string) {
-        const newStatus: DelegationStatus = {};
-        
-        await Promise.all(SUPPORTED_CHAINS.map(async (chain) => {
-            try {
-                const state = await checkChainDelegation(address, chain.id, chain.rpc);
-                newStatus[chain.id] = state;
-            } catch (err) {
-                console.error(`Failed to check delegation on ${chain.name}:`, err);
-                newStatus[chain.id] = 'unknown';
-            }
-        }));
-        
-        setDelegationStatus(newStatus);
-    }
-
-    /**
-     * Check if address has 7702 delegation to our contract on a specific chain
-     */
-    async function checkChainDelegation(
-        address: string, 
-        chainId: number, 
+    const checkChainDelegation = useCallback(async (
+        address: string,
+        chainId: number,
         rpc: string
-    ): Promise<DelegationState> {
+    ): Promise<ChainDelegation> => {
         const expectedDelegate = (delegateAddresses as Record<string, string>)[chainId.toString()];
-        if (!expectedDelegate) return 'unknown';
 
         try {
-            // Call eth_getCode to check if EOA has delegated code
             const response = await fetch(rpc, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -104,32 +51,90 @@ export function Settings() {
                     params: [address, 'latest']
                 })
             });
-            
+
             const data = await response.json();
             const code = data.result;
-            
-            // 7702 delegation sets code to: 0xef0100 + delegateAddress (20 bytes)
-            // Total: 0xef0100 (3 bytes) + address (20 bytes) = 23 bytes = 46 hex chars + '0x' = 48 chars
+
+            // 7702 delegation: 0xef0100 + 20-byte address = 48 hex chars
             if (!code || code === '0x' || code.length < 48) {
-                return 'not_delegated';
+                return { state: 'not_delegated' };
             }
-            
-            // Check if delegated to our contract
-            // Format: 0xef0100<20-byte-address>
-            const delegatedTo = '0x' + code.slice(8).toLowerCase(); // Skip 0xef0100
-            const expectedLower = expectedDelegate.toLowerCase();
-            
-            if (delegatedTo === expectedLower) {
-                return 'delegated';
+
+            // Extract delegated address from 0xef0100<addr>
+            const delegatedTo = '0x' + code.slice(8).toLowerCase();
+
+            if (expectedDelegate && delegatedTo === expectedDelegate.toLowerCase()) {
+                return { state: 'delegated' };
             } else {
-                // Delegated to someone else (like Ambire)
-                console.log(`Delegated to different contract: ${delegatedTo}`);
-                return 'not_delegated';
+                return { state: 'delegated_other', delegatedTo };
             }
         } catch (err) {
-            console.error('eth_getCode failed:', err);
-            return 'unknown';
+            console.error(`eth_getCode failed for chain ${chainId}:`, err);
+            return { state: 'unknown' };
         }
+    }, []);
+
+    /**
+     * Check all chains — works even without wallet connection (uses hardcoded address or relay)
+     */
+    const checkAllChains = useCallback(async (address: string) => {
+        const newStatus: DelegationStatus = {};
+
+        await Promise.all(SUPPORTED_CHAINS.map(async (chain) => {
+            try {
+                newStatus[chain.id] = await checkChainDelegation(address, chain.id, chain.rpc);
+            } catch {
+                newStatus[chain.id] = { state: 'unknown' };
+            }
+        }));
+
+        setDelegationStatus(newStatus);
+    }, [checkChainDelegation]);
+
+    useEffect(() => {
+        async function init() {
+            setLoading(true);
+            try {
+                // Try to get address from the dapp tab's wallet
+                const result = await getAccounts();
+                if (result.ok && result.result?.length) {
+                    const addr = result.result[0];
+                    setWalletAddress(addr);
+                    await checkAllChains(addr);
+                }
+            } catch (err) {
+                console.warn('[Magnee Settings] Could not reach wallet:', err);
+            } finally {
+                setLoading(false);
+            }
+        }
+        init();
+    }, [checkAllChains]);
+
+    /**
+     * Send a 7702 authorization tx via eth_sendTransaction with type 0x04.
+     * Works with Trust Wallet and other wallets that support EIP-7702 natively.
+     */
+    async function send7702Auth(chainId: number, contractAddress: string): Promise<string> {
+        const hexChainId = `0x${chainId.toString(16)}`;
+
+        const result = await walletRequest('eth_sendTransaction', [{
+            type: '0x04',
+            from: walletAddress,
+            to: walletAddress,
+            value: '0x0',
+            data: '0x',
+            authorizationList: [{
+                address: contractAddress,
+                chainId: hexChainId,
+            }]
+        }]);
+
+        if (!result.ok) {
+            throw new Error(result.error || 'Delegation transaction failed');
+        }
+
+        return result.result || '';
     }
 
     /**
@@ -145,228 +150,192 @@ export function Settings() {
         }
 
         setPendingChain(chainId);
-        setDelegationStatus(prev => ({ ...prev, [chainId]: 'pending' }));
+        setDelegationStatus(prev => ({ ...prev, [chainId]: { state: 'pending' } }));
         setError(null);
 
         try {
-            // Switch to target chain
             const switchResult = await switchChain(chainId);
-            if (!switchResult.ok) {
-                throw new Error(switchResult.error || 'Failed to switch chain');
-            }
+            if (!switchResult.ok) throw new Error(switchResult.error || 'Failed to switch chain');
 
-            // Send EIP-7702 transaction
-            const result = await walletRequest('eth_sendTransaction', [{
-                type: '0x04',
-                from: walletAddress,
-                to: walletAddress,
-                value: '0x0',
-                data: '0x',
-                authorizationList: [{
-                    address: delegateAddress,
-                    chainId: `0x${chainId.toString(16)}`
-                }]
-            }]);
+            const txHash = await send7702Auth(chainId, delegateAddress);
+            console.log('[Magnee] Delegation tx:', txHash);
 
-            if (!result.ok) {
-                throw new Error(result.error || 'Delegation failed');
-            }
-
-            console.log('Delegation tx hash:', result.result);
-            
-            // Re-check on-chain status after a short delay
+            // Re-check after a delay
             setTimeout(() => {
                 if (walletAddress) {
                     const chain = SUPPORTED_CHAINS.find(c => c.id === chainId);
                     if (chain) {
                         checkChainDelegation(walletAddress, chainId, chain.rpc)
-                            .then(state => setDelegationStatus(prev => ({ ...prev, [chainId]: state })));
+                            .then(d => setDelegationStatus(prev => ({ ...prev, [chainId]: d })));
                     }
                 }
-            }, 3000);
-
+            }, 5000);
         } catch (err: any) {
-            console.error('Delegation failed:', err);
-            setDelegationStatus(prev => ({ ...prev, [chainId]: 'not_delegated' }));
-            
-            if (err.message?.includes('not supported') || err.message?.includes('unknown type')) {
-                setError('Your wallet does not support EIP-7702. Try MetaMask or a 7702-compatible wallet.');
-            } else if (err.message?.includes('rejected') || err.message?.includes('denied')) {
-                setError('Transaction rejected by user.');
-            } else {
-                setError(err.message || 'Delegation failed');
+            console.error('[Magnee] Delegation failed:', err);
+            const chain = SUPPORTED_CHAINS.find(c => c.id === chainId);
+            if (chain && walletAddress) {
+                checkChainDelegation(walletAddress, chainId, chain.rpc)
+                    .then(d => setDelegationStatus(prev => ({ ...prev, [chainId]: d })));
             }
+            setError(err.message || 'Delegation failed');
         } finally {
             setPendingChain(null);
         }
     }
 
     /**
-     * Revoke 7702 delegation (set to zero address)
+     * Revoke 7702 delegation on a chain
      */
     async function revokeOnChain(chainId: number) {
         if (!walletAddress) return;
 
         setPendingChain(chainId);
-        setDelegationStatus(prev => ({ ...prev, [chainId]: 'pending' }));
+        setDelegationStatus(prev => ({ ...prev, [chainId]: { state: 'pending' } }));
         setError(null);
 
         try {
-            // Switch to target chain
             const switchResult = await switchChain(chainId);
-            if (!switchResult.ok) {
-                throw new Error(switchResult.error || 'Failed to switch chain');
-            }
+            if (!switchResult.ok) throw new Error(switchResult.error || 'Failed to switch chain');
 
-            // Send 7702 tx with zero address to revoke
-            const result = await walletRequest('eth_sendTransaction', [{
-                type: '0x04',
-                from: walletAddress,
-                to: walletAddress,
-                value: '0x0',
-                data: '0x',
-                authorizationList: [{
-                    address: '0x0000000000000000000000000000000000000000',
-                    chainId: `0x${chainId.toString(16)}`
-                }]
-            }]);
+            // Revoke = delegate to zero address
+            const txHash = await send7702Auth(chainId, '0x0000000000000000000000000000000000000000');
+            console.log('[Magnee] Revoke tx:', txHash);
 
-            if (!result.ok) {
-                throw new Error(result.error || 'Revocation failed');
-            }
-
-            console.log('Revocation tx hash:', result.result);
-            
-            // Re-check on-chain status
             setTimeout(() => {
                 if (walletAddress) {
                     const chain = SUPPORTED_CHAINS.find(c => c.id === chainId);
                     if (chain) {
                         checkChainDelegation(walletAddress, chainId, chain.rpc)
-                            .then(state => setDelegationStatus(prev => ({ ...prev, [chainId]: state })));
+                            .then(d => setDelegationStatus(prev => ({ ...prev, [chainId]: d })));
                     }
                 }
-            }, 3000);
-
+            }, 5000);
         } catch (err: any) {
-            console.error('Revocation failed:', err);
-            if (err.message?.includes('rejected') || err.message?.includes('denied')) {
-                setError('Transaction rejected by user.');
-            } else {
-                setError(err.message || 'Revocation failed');
-            }
-            // Re-check actual status
+            console.error('[Magnee] Revocation failed:', err);
             const chain = SUPPORTED_CHAINS.find(c => c.id === chainId);
             if (chain && walletAddress) {
                 checkChainDelegation(walletAddress, chainId, chain.rpc)
-                    .then(state => setDelegationStatus(prev => ({ ...prev, [chainId]: state })));
+                    .then(d => setDelegationStatus(prev => ({ ...prev, [chainId]: d })));
             }
+            setError(err.message || 'Revocation failed');
         } finally {
             setPendingChain(null);
         }
     }
 
     function getStatusBadge(chainId: number) {
-        const status = delegationStatus[chainId] || 'unknown';
-        const styles = {
+        const d = delegationStatus[chainId] || { state: 'unknown' };
+        const styles: Record<DelegationState, string> = {
             delegated: 'bg-green-500/20 text-green-400',
+            delegated_other: 'bg-amber-500/20 text-amber-400',
             pending: 'bg-yellow-500/20 text-yellow-400',
-            not_delegated: 'bg-red-500/20 text-red-400',
-            unknown: 'bg-gray-500/20 text-gray-400',
+            not_delegated: 'bg-white/5 text-slate-500',
+            unknown: 'bg-white/5 text-slate-600',
         };
-        const labels = {
-            delegated: '✓ Delegated',
-            pending: '⏳ Pending...',
-            not_delegated: '✗ Not Delegated',
-            unknown: '? Checking...',
+        const labels: Record<DelegationState, string> = {
+            delegated: '✓ Active',
+            delegated_other: '⚠ Other',
+            pending: '⏳ Pending',
+            not_delegated: '—',
+            unknown: '...',
         };
         return (
-            <span className={cn('text-xs px-2 py-1 rounded', styles[status])}>
-                {labels[status]}
+            <span className={cn('text-xs px-2 py-0.5 rounded font-mono', styles[d.state])}>
+                {labels[d.state]}
             </span>
         );
     }
 
+    const isActive = !!walletAddress;
+
     return (
         <div className="w-full min-w-[320px] max-w-[400px] min-h-fit p-5 bg-linear-to-br from-slate-900 to-slate-800 text-white">
             {/* Header */}
-            <header className="text-center mb-6">
+            <header className="text-center mb-5">
                 <h1 className="text-2xl font-bold bg-linear-to-r from-cyan-400 to-purple-500 bg-clip-text text-transparent">
                     ⚡ Magnee
                 </h1>
                 <p className="text-sm text-slate-400 mt-1">Cross-Chain Payment Interceptor</p>
             </header>
 
-            {/* Error Display */}
+            {/* Error */}
             {error && (
                 <div className="bg-red-500/20 border border-red-500/30 rounded-lg p-3 mb-4 text-sm text-red-300">
                     {error}
                 </div>
             )}
 
-            {!walletConnected ? (
-                <section className="text-center py-10">
-                    <p className="text-slate-300 mb-4">Connect your wallet to manage delegation settings.</p>
-                    <Button 
-                        onClick={connectWallet}
-                        className="bg-linear-to-r from-cyan-500 to-purple-600 hover:from-cyan-400 hover:to-purple-500"
-                    >
-                        Connect Wallet
-                    </Button>
+            {loading ? (
+                <p className="text-center text-slate-500 text-sm py-6">Checking wallet...</p>
+            ) : !isActive ? (
+                <section className="text-center py-6">
+                    <p className="text-slate-500 text-sm leading-relaxed">
+                        Open a web3 app with a connected wallet,<br />
+                        then reopen this popup.
+                    </p>
                 </section>
             ) : (
                 <>
-                    {/* Wallet Info */}
+                    {/* Address */}
                     <section className="bg-white/5 rounded-lg p-3 mb-5">
                         <code className="text-cyan-400 text-sm">
                             {walletAddress?.slice(0, 6)}...{walletAddress?.slice(-4)}
                         </code>
                     </section>
 
-                    {/* Delegation Section */}
-                    <section className="mb-5">
-                        <h2 className="text-base font-semibold mb-2">🔗 Chain Delegation</h2>
-                        <p className="text-xs text-slate-400 mb-4">
-                            Delegate your EOA on target chains to enable cross-chain payments 
-                            with preserved <code className="bg-white/10 px-1.5 py-0.5 rounded text-cyan-400">msg.sender</code>.
+                    {/* Delegation */}
+                    <section className="mb-2">
+                        <h2 className="text-base font-semibold mb-1">🔗 Chain Delegation</h2>
+                        <p className="text-xs text-slate-400 mb-3">
+                            Delegate your EOA on target chains to enable cross-chain payments
+                            with preserved <code className="bg-white/10 px-1 py-0.5 rounded text-cyan-400">msg.sender</code>.
                         </p>
 
-                        <div className="flex flex-col gap-2.5">
+                        <div className="flex flex-col gap-2">
                             {SUPPORTED_CHAINS.map(chain => {
-                                const status = delegationStatus[chain.id] || 'unknown';
-                                const isDelegated = status === 'delegated';
+                                const d = delegationStatus[chain.id] || { state: 'unknown' };
+                                const isDelegated = d.state === 'delegated';
+                                const isDelegatedOther = d.state === 'delegated_other';
+                                const canRevoke = isDelegated || isDelegatedOther;
                                 const isPending = pendingChain === chain.id;
-                                
+
                                 return (
-                                    <div key={chain.id} className="flex justify-between items-center bg-white/5 rounded-lg p-3">
-                                        <div className="flex items-center gap-2">
-                                            <span className={cn('w-2.5 h-2.5 rounded-full', chain.color)} />
-                                            <span className="font-medium">{chain.name}</span>
+                                    <div key={chain.id} className="bg-white/5 rounded-lg p-3">
+                                        <div className="flex justify-between items-center">
+                                            <div className="flex items-center gap-2">
+                                                <span className={cn('w-2 h-2 rounded-full', chain.color)} />
+                                                <span className="font-medium text-sm">{chain.name}</span>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                {getStatusBadge(chain.id)}
+                                                {canRevoke ? (
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={() => revokeOnChain(chain.id)}
+                                                        disabled={isPending}
+                                                        className="text-red-400 border-red-400/30 hover:bg-red-400/20 text-xs h-7"
+                                                    >
+                                                        {isPending ? '⏳...' : 'Revoke'}
+                                                    </Button>
+                                                ) : d.state === 'not_delegated' ? (
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={() => delegateOnChain(chain.id)}
+                                                        disabled={isPending}
+                                                        className="text-cyan-400 border-cyan-400/30 hover:bg-cyan-400/20 text-xs h-7"
+                                                    >
+                                                        {isPending ? '⏳...' : 'Delegate'}
+                                                    </Button>
+                                                ) : null}
+                                            </div>
                                         </div>
-                                        <div className="flex items-center gap-2">
-                                            {getStatusBadge(chain.id)}
-                                            {isDelegated ? (
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    onClick={() => revokeOnChain(chain.id)}
-                                                    disabled={isPending}
-                                                    className="text-red-400 border-red-400/30 hover:bg-red-400/20"
-                                                >
-                                                    {isPending ? 'Revoking...' : 'Revoke'}
-                                                </Button>
-                                            ) : (
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    onClick={() => delegateOnChain(chain.id)}
-                                                    disabled={isPending}
-                                                    className="text-cyan-400 border-cyan-400/30 hover:bg-cyan-400/20"
-                                                >
-                                                    {isPending ? 'Delegating...' : 'Delegate'}
-                                                </Button>
-                                            )}
-                                        </div>
+                                        {isDelegatedOther && d.delegatedTo && (
+                                            <p className="text-xs text-amber-400/70 mt-1.5 font-mono truncate">
+                                                → {d.delegatedTo}
+                                            </p>
+                                        )}
                                     </div>
                                 );
                             })}
