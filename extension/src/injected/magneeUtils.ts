@@ -24,6 +24,10 @@ export interface Route {
         to: string;
         data: string;
     };
+    // Li.Fi SDK step object for executeRoute() - NOT serializable through messaging
+    lifiStep?: any;
+    // Li.Fi contract calls for getContractCalls callback
+    lifiContractCalls?: any[];
 }
 
 /**
@@ -99,6 +103,98 @@ export function buildGetCapabilities(fromAddress: string): { method: string; par
         method: 'wallet_getCapabilities',
         params: [fromAddress]
     };
+}
+
+/**
+ * Encode a call to MagneeDelegateAccount.executeSingle()
+ * NOTE: Only works for same-chain self-calls (msg.sender == address(this))
+ * For cross-chain calls, use encodeExecuteWithSignature()
+ * 
+ * @param target - The actual contract to call
+ * @param value - ETH value to send (hex string)
+ * @param data - Calldata for the target contract
+ * @returns Encoded executeSingle calldata
+ */
+export function encodeExecuteSingle(
+    target: string,
+    value: string,
+    data: string
+): string {
+    const selector = '0xd969c875'; // executeSingle(address,uint256,bytes)
+    
+    const targetPadded = target.toLowerCase().replace('0x', '').padStart(64, '0');
+    const valueBigInt = BigInt(value || '0x0');
+    const valuePadded = valueBigInt.toString(16).padStart(64, '0');
+    
+    // Bytes offset (96 = 0x60 for 3rd parameter)
+    const bytesOffset = '0000000000000000000000000000000000000000000000000000000000000060';
+    
+    const dataHex = data.replace('0x', '');
+    const dataLength = (dataHex.length / 2).toString(16).padStart(64, '0');
+    const dataPadded = dataHex.padEnd(Math.ceil(dataHex.length / 64) * 64, '0');
+    
+    return selector + targetPadded + valuePadded + bytesOffset + dataLength + dataPadded;
+}
+
+/**
+ * Encode a call to MagneeDelegateAccount.executeWithSignature()
+ * Used for cross-chain execution where msg.sender is a bridge executor.
+ * Includes EIP-712 signature for authorization.
+ * 
+ * @param target - The actual contract to call
+ * @param value - ETH value to send (hex string)
+ * @param data - Calldata for the target contract
+ * @param nonce - Unique nonce to prevent replay (hex string)
+ * @param deadline - Unix timestamp deadline (hex string)
+ * @param signature - EIP-712 signature (65 bytes hex)
+ * @returns Encoded executeWithSignature calldata
+ */
+export function encodeExecuteWithSignature(
+    target: string,
+    value: string,
+    data: string,
+    nonce: string,
+    deadline: string,
+    signature: string
+): string {
+    // executeWithSignature(address,uint256,bytes,uint256,uint256,bytes)
+    const selector = '0x7206c4a0';
+    
+    const targetPadded = target.toLowerCase().replace('0x', '').padStart(64, '0');
+    const valueBigInt = BigInt(value || '0x0');
+    const valuePadded = valueBigInt.toString(16).padStart(64, '0');
+    
+    // Dynamic params offsets: data at 6*32=192=0xC0, signature at end
+    // Slots: target(0), value(1), data_offset(2), nonce(3), deadline(4), sig_offset(5)
+    const dataOffset = (6 * 32).toString(16).padStart(64, '0'); // 0xC0
+    
+    const nonceBigInt = BigInt(nonce || '0x0');
+    const noncePadded = nonceBigInt.toString(16).padStart(64, '0');
+    
+    const deadlineBigInt = BigInt(deadline || '0x0');
+    const deadlinePadded = deadlineBigInt.toString(16).padStart(64, '0');
+    
+    // Encode bytes data
+    const dataHex = data.replace('0x', '');
+    const dataLengthBytes = dataHex.length / 2;
+    const dataLengthPadded = dataLengthBytes.toString(16).padStart(64, '0');
+    const dataPadded = dataHex.padEnd(Math.ceil(dataHex.length / 64) * 64, '0');
+    const dataWords = Math.ceil(dataHex.length / 64); // 32-byte words for data
+    
+    // Signature offset: dataOffset + 32 (length) + dataWords * 32  
+    const sigByteOffset = 6 * 32 + 32 + dataWords * 32;
+    const sigOffset = sigByteOffset.toString(16).padStart(64, '0');
+    
+    // Encode signature bytes
+    const sigHex = signature.replace('0x', '');
+    const sigLength = (sigHex.length / 2).toString(16).padStart(64, '0');
+    const sigPadded = sigHex.padEnd(Math.ceil(sigHex.length / 64) * 64, '0');
+    
+    return selector 
+        + targetPadded + valuePadded + dataOffset 
+        + noncePadded + deadlinePadded + sigOffset
+        + dataLengthPadded + dataPadded
+        + sigLength + sigPadded;
 }
 
 /**

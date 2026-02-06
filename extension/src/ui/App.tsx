@@ -60,12 +60,10 @@ export default function App() {
 
     // Function to restore original chain
     const restoreOriginalChain = useCallback(async () => {
-        if (originalChainId && window.ethereum) {
+        if (originalChainId) {
             try {
-                await window.ethereum.request({
-                    method: 'wallet_switchEthereumChain',
-                    params: [{ chainId: `0x${originalChainId.toString(16)}` }]
-                });
+                const { switchChain } = await import('@/lib/walletBridge');
+                await switchChain(originalChainId);
                 console.log('[Magnee] Restored original chain:', originalChainId);
             } catch (err) {
                 console.warn('[Magnee] Failed to restore chain:', err);
@@ -73,22 +71,31 @@ export default function App() {
         }
     }, [originalChainId]);
 
-    // Initialize SDK and save original chain
+    // Initialize SDK with bridge provider (window.ethereum doesn't exist in extension popups)
     useEffect(() => {
         const init = async () => {
-            // Save original chain for restoration
-            if (window.ethereum) {
-                try {
-                    const chainIdHex = await window.ethereum.request({ method: 'eth_chainId' });
-                    const chainId = parseInt(chainIdHex as string, 16);
-                    setOriginalChainId(chainId);
-                    console.log('[Magnee] Saved original chain:', chainId);
+            try {
+                // Create EIP-1193 provider that proxies calls through walletBridge
+                // (which uses chrome.scripting.executeScript to reach the active tab's wallet)
+                const { walletRequest } = await import('@/lib/walletBridge');
+                const bridgeProvider = {
+                    request: async ({ method, params }: { method: string; params?: any[] }) => {
+                        const result = await walletRequest(method, params);
+                        if (!result.ok) throw new Error(result.error || 'Wallet request failed');
+                        return result.result;
+                    }
+                };
 
-                    // Initialize Li.Fi SDK
-                    initLiFiSDK(window.ethereum);
-                } catch (err) {
-                    console.warn('[Magnee] Failed to get chain:', err);
-                }
+                // Get original chain for restoration
+                const chainIdHex = await bridgeProvider.request({ method: 'eth_chainId' });
+                const chainId = parseInt(chainIdHex as string, 16);
+                setOriginalChainId(chainId);
+                console.log('[Magnee] Saved original chain:', chainId);
+
+                // Initialize Li.Fi SDK with bridge provider
+                initLiFiSDK(bridgeProvider);
+            } catch (err) {
+                console.warn('[Magnee] Failed to init SDK:', err);
             }
         };
         init();
@@ -178,19 +185,95 @@ export default function App() {
         }
     };
 
-    const handleDecision = (action: 'MAGNEEFY' | 'CONTINUE' | 'REJECT', route?: Route) => {
+    const handleDecision = async (action: 'MAGNEEFY' | 'CONTINUE' | 'REJECT', route?: Route) => {
         if (!reqId) return;
-        const payloadRoute = action === 'MAGNEEFY' ? (route || selectedRoute) : undefined;
-        chrome.runtime.sendMessage({
-            type: 'MAGNEE_DECISION',
-            payload: { id: reqId, action, route: payloadRoute }
-        });
+        const chosenRoute = action === 'MAGNEEFY' ? (route || selectedRoute) : undefined;
 
         if (action === 'REJECT') {
+            chrome.runtime.sendMessage({
+                type: 'MAGNEE_DECISION',
+                payload: { id: reqId, action }
+            });
             window.close();
-        } else {
-            setStep('STATUS');
+            return;
         }
+
+        if (action === 'MAGNEEFY' && chosenRoute?.lifiStep) {
+            // Execute via Li.Fi SDK - handles full lifecycle including destination calls
+            setStep('EXECUTING');
+            const updateMsg = (msg: string) => {
+                console.log('[Magnee]', msg);
+                setExecutionStatus({ step: 1, total: 1, status: 'in_progress', message: msg });
+            };
+
+            try {
+                updateMsg('Step 1: Creating wallet bridge...');
+                const { walletRequest, setCurrentReqId } = await import('@/lib/walletBridge');
+                setCurrentReqId(reqId!);  // Route to the correct dapp tab
+                
+                updateMsg('Step 2: Testing wallet connection...');
+                const testResult = await walletRequest('eth_chainId');
+                if (!testResult.ok) {
+                    throw new Error(`Wallet bridge failed: ${testResult.error}`);
+                }
+
+                // Switch to source chain FIRST (before SDK init so client gets correct chain)
+                const currentChainHex = testResult.result as string;
+                const sourceChainHex = `0x${chosenRoute.chainId.toString(16)}`;
+                if (currentChainHex !== sourceChainHex) {
+                    updateMsg(`Step 2b: Switching to source chain ${chosenRoute.chainId}...`);
+                    await walletRequest('wallet_switchEthereumChain', [{ chainId: sourceChainHex }]);
+                }
+
+                // Create EIP-1193 provider for Li.Fi SDK
+                const bridgeProvider = {
+                    request: async ({ method, params }: { method: string; params?: any[] }) => {
+                        const result = await walletRequest(method, params);
+                        if (!result.ok) throw new Error(result.error || `RPC ${method} failed`);
+                        return result.result;
+                    }
+                };
+
+                updateMsg('Step 3: Initializing Li.Fi SDK...');
+                const { initLiFiSDK, executeLiFiRoute } = await import('@/lib/lifi');
+                await initLiFiSDK(bridgeProvider, chosenRoute.chainId);
+
+                updateMsg('Step 4: Executing route via Li.Fi SDK...');
+                const result = await executeLiFiRoute(chosenRoute.lifiStep, chosenRoute.lifiContractCalls, (update) => {
+                    setExecutionStatus(update);
+                    console.log('[Magnee] Li.Fi execution update:', update);
+                });
+
+                console.log('[Magnee] Li.Fi route execution complete:', result);
+                setExecutionStatus({
+                    step: 1, total: 1, status: 'done',
+                    message: 'Cross-chain execution completed!'
+                });
+
+                // Original tx was already handled by Li.Fi bridge + contract calls
+                // REJECT the original to prevent double-execution
+                chrome.runtime.sendMessage({
+                    type: 'MAGNEE_DECISION',
+                    payload: { id: reqId, action: 'REJECT' }
+                });
+                setStep('STATUS');
+            } catch (err: any) {
+                console.error('[Magnee] Li.Fi execution failed:', err);
+                setExecutionStatus({
+                    step: 1, total: 1, status: 'failed',
+                    message: err?.message || 'Execution failed'
+                });
+                setStep('STATUS');
+            }
+            return;
+        }
+
+        // Fallback: send raw calldata to content script for execution
+        chrome.runtime.sendMessage({
+            type: 'MAGNEE_DECISION',
+            payload: { id: reqId, action, route: chosenRoute }
+        });
+        setStep('STATUS');
     };
 
     const handleApprove = () => {

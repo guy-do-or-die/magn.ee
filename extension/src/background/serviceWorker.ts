@@ -35,7 +35,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         console.log('[Magnee BG] Opening approval popup for:', reqId, 'Chain:', chainId);
 
         chrome.windows.create({
-            url: `src/ui/popup.html?id=${reqId}`, // Updated to popup.html
+            url: `src/ui/intercept.html?id=${reqId}`,
             type: 'popup',
             width: 420,
             height: 650,
@@ -112,6 +112,54 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             return false;
         }
     }
+
+    if (message.type === 'WALLET_RPC') {
+        const { method, params, reqId } = message.payload;
+        console.log('[Magnee BG] WALLET_RPC:', method, 'reqId:', reqId);
+
+        // Find the tab to execute on — use stored tabId from the pending request
+        const req = reqId ? pendingRequests.get(reqId) : null;
+        const tabId = req?.tabId;
+
+        if (!tabId) {
+            // Fallback: find any active http tab
+            chrome.tabs.query({ active: true }, (tabs) => {
+                const httpTab = tabs.find(t => t.url?.startsWith('http'));
+                if (!httpTab?.id) {
+                    sendResponse({ ok: false, error: 'No dapp tab found' });
+                    return;
+                }
+                executeWalletRPC(httpTab.id, method, params ?? [], sendResponse);
+            });
+            return true;
+        }
+
+        executeWalletRPC(tabId, method, params ?? [], sendResponse);
+        return true;
+    }
 });
+
+function executeWalletRPC(tabId: number, method: string, params: any[], sendResponse: (r: any) => void) {
+    chrome.scripting.executeScript({
+        target: { tabId },
+        world: 'MAIN',
+        args: [method, params],
+        func: async (method: string, params: any[]) => {
+            // @ts-ignore
+            if (!window.ethereum) return { ok: false, error: 'No wallet on this page' };
+            try {
+                // @ts-ignore
+                const result = await window.ethereum.request({ method, params });
+                return { ok: true, result };
+            } catch (e: any) {
+                return { ok: false, error: e?.message ?? String(e) };
+            }
+        }
+    }).then(([execResult]) => {
+        sendResponse(execResult?.result ?? { ok: false, error: 'No result' });
+    }).catch(err => {
+        sendResponse({ ok: false, error: err?.message ?? String(err) });
+    });
+}
 
 console.log('[Magnee BG] Service worker started');

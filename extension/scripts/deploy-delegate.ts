@@ -11,10 +11,9 @@
  * - ETHERSCAN_API_KEY in .env
  */
 
-import { $ } from 'bun';
-
 const DELEGATES_JSON = 'src/lib/delegates.json';
 const DEPLOY_SCRIPT = 'script/Deploy7702Delegate.s.sol';
+const CONTRACTS_DIR = '../contracts';
 
 const CHAIN_IDS: Record<string, number> = {
     mainnet: 1,
@@ -26,20 +25,40 @@ const CHAIN_IDS: Record<string, number> = {
     arb: 42161,
 };
 
-async function deploy(chain: string): Promise<string | null> {
+/** Run a command with live output (stdio inherited) */
+async function run(cmd: string[], cwd = CONTRACTS_DIR): Promise<number> {
+    const proc = Bun.spawn(cmd, { cwd, stdio: ['inherit', 'inherit', 'inherit'] });
+    return proc.exited;
+}
+
+async function deploy(chain: string, chainId: number): Promise<string | null> {
     console.log(`\n🚀 Deploying to ${chain}...`);
     
-    const result = await $`cd ../contracts && forge script ${DEPLOY_SCRIPT} --account default --broadcast --rpc-url ${chain}`.text();
-    console.log(result);
+    const exitCode = await run([
+        'forge', 'script', DEPLOY_SCRIPT,
+        '--account', 'default', '--broadcast', '--rpc-url', chain
+    ]);
     
-    // Parse deployed address from output
-    const match = result.match(/MagneeDelegateAccount deployed to: (0x[a-fA-F0-9]{40})/);
-    if (!match) {
-        console.error('❌ Could not parse deployed address from output');
+    if (exitCode !== 0) {
+        console.error('❌ Deployment failed');
         return null;
     }
     
-    return match[1];
+    // Parse deployed address from broadcast JSON (more reliable than stdout)
+    const broadcastFile = Bun.file(`${CONTRACTS_DIR}/broadcast/Deploy7702Delegate.s.sol/${chainId}/run-latest.json`);
+    if (!await broadcastFile.exists()) {
+        console.error('❌ Broadcast file not found');
+        return null;
+    }
+    
+    const broadcast = await broadcastFile.json() as any;
+    const createTx = broadcast.transactions?.find((tx: any) => tx.transactionType === 'CREATE');
+    if (!createTx?.contractAddress) {
+        console.error('❌ Could not find deployed address in broadcast');
+        return null;
+    }
+    
+    return createTx.contractAddress;
 }
 
 async function updateDelegatesJson(chainId: number, address: string): Promise<void> {
@@ -62,20 +81,22 @@ async function updateDelegatesJson(chainId: number, address: string): Promise<vo
 async function verify(chain: string, address: string): Promise<void> {
     console.log(`\n🔍 Verifying on ${chain}...`);
     
-    // Bun automatically loads .env - get API key from env
     const apiKey = process.env.ETHERSCAN_API_KEY;
-    
     if (!apiKey) {
         console.log('⚠️  ETHERSCAN_API_KEY not set - skipping verification');
         return;
     }
     
-    try {
-        const result = await $`cd ../contracts && forge verify-contract ${address} src/MagneeDelegateAccount.sol:MagneeDelegateAccount --rpc-url ${chain} --etherscan-api-key ${apiKey}`.text();
-        console.log(result);
+    const exitCode = await run([
+        'forge', 'verify-contract', address,
+        'src/MagneeDelegateAccount.sol:MagneeDelegateAccount',
+        '--rpc-url', chain, '--etherscan-api-key', apiKey
+    ]);
+    
+    if (exitCode === 0) {
         console.log('✅ Verification complete');
-    } catch (e: any) {
-        console.log('⚠️  Verification failed:', e.message || e);
+    } else {
+        console.log('⚠️  Verification failed (exit code', exitCode + ')');
     }
 }
 
@@ -101,7 +122,7 @@ console.log(`  Magnee Delegate Deployment: ${chainArg} (${chainId})`);
 console.log('═══════════════════════════════════════════════════');
 
 // Step 1: Deploy
-const address = await deploy(chainArg);
+const address = await deploy(chainArg, chainId);
 if (!address) {
     process.exit(1);
 }

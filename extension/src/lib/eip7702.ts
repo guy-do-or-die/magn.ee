@@ -35,12 +35,30 @@ export function encodeBatchExecute(calls: Call[]): Hex {
 
 /**
  * Encode a single call for the MagneeDelegateAccount.executeSingle function
+ * NOTE: This is for same-chain self-calls only (msg.sender == address(this))
  */
 export function encodeSingleExecute(call: Call): Hex {
     return encodeFunctionData({
         abi: magneeDelegateAccountAbi,
         functionName: 'executeSingle',
         args: [call.target, call.value, call.data]
+    });
+}
+
+/**
+ * Encode execution with EIP-712 signature for cross-chain calls.
+ * Used by Li.Fi executors on destination chain where msg.sender != EOA.
+ */
+export function encodeExecuteWithSignature(
+    call: Call,
+    nonce: bigint,
+    deadline: bigint,
+    signature: Hex
+): Hex {
+    return encodeFunctionData({
+        abi: magneeDelegateAccountAbi,
+        functionName: 'executeWithSignature',
+        args: [call.target, call.value, call.data, nonce, deadline, signature]
     });
 }
 

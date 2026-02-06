@@ -35,24 +35,50 @@ export const magneeDelegateAccountAbi = [
     stateMutability: 'payable',
   },
   {
+    type: 'function',
+    inputs: [
+      { name: 'target', internalType: 'address', type: 'address' },
+      { name: 'value', internalType: 'uint256', type: 'uint256' },
+      { name: 'data', internalType: 'bytes', type: 'bytes' },
+      { name: 'nonce', internalType: 'uint256', type: 'uint256' },
+      { name: 'deadline', internalType: 'uint256', type: 'uint256' },
+      { name: 'signature', internalType: 'bytes', type: 'bytes' },
+    ],
+    name: 'executeWithSignature',
+    outputs: [{ name: 'result', internalType: 'bytes', type: 'bytes' }],
+    stateMutability: 'payable',
+  },
+  {
+    type: 'function',
+    inputs: [{ name: '', internalType: 'uint256', type: 'uint256' }],
+    name: 'usedNonces',
+    outputs: [{ name: '', internalType: 'bool', type: 'bool' }],
+    stateMutability: 'view',
+  },
+  {
     type: 'event',
     anonymous: false,
     inputs: [
       {
-        name: 'account',
+        name: 'target',
         internalType: 'address',
         type: 'address',
         indexed: true,
       },
       {
-        name: 'callCount',
+        name: 'value',
         internalType: 'uint256',
         type: 'uint256',
         indexed: false,
       },
+      { name: 'success', internalType: 'bool', type: 'bool', indexed: false },
     ],
     name: 'Executed',
   },
+  { type: 'error', inputs: [], name: 'ExpiredDeadline' },
+  { type: 'error', inputs: [], name: 'InvalidSignature' },
+  { type: 'error', inputs: [], name: 'NonceAlreadyUsed' },
+  { type: 'error', inputs: [], name: 'Unauthorized' },
 ] as const
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
