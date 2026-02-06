@@ -18,9 +18,12 @@
         "verify:chain": "source .env && cd contracts && forge verify-contract --rpc-url",
         "test": "bun run test:ext && bun run test:contracts",
         "test:ext": "cd extension && bun test",
-        "test:contracts": "cd contracts && forge test"
+        "test:contracts": "cd contracts && forge test",
+        "tx-trace": "bun scripts/tx-trace.ts"
     },
     "devDependencies": {
-        "concurrently": "^9.0.0"
+        "@types/bun": "^1.3.8",
+        "concurrently": "^9.0.0",
+        "viem": "^2.45.1"
     }
 }
