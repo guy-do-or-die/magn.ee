@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useAccount, useConnect, useDisconnect, useBalance, useSendTransaction, useReadContract, useWaitForTransactionReceipt } from 'wagmi'
 import { parseEther, formatEther, encodeFunctionData } from 'viem'
-import { DEMO_ADDRESSES, DEMO_ABI } from './wagmi'
+import { DEMO_ADDRESSES, DELEGATE_ADDRESSES, DEMO_ABI, explorerAddress } from './wagmi'
 import './App.css'
 
 function App() {
@@ -15,8 +15,9 @@ function App() {
   const [magneeActive, setMagneeActive] = useState(false)
 
   // Dynamic Address Selection
-  const activeChainId = chain?.id || 31337
+  const activeChainId = chain?.id || 1
   const currentDemoAddress = DEMO_ADDRESSES[activeChainId]
+  const currentDelegateAddress = DELEGATE_ADDRESSES[activeChainId]
 
   const { data: totalDonations, refetch: refetchDonations } = useReadContract({
     address: currentDemoAddress,
@@ -78,7 +79,19 @@ function App() {
         <div className="addresses">
           <div>
             <label>PayableDemo ({chain?.name || 'Local'})</label>
-            <code>{currentDemoAddress ? `${currentDemoAddress.slice(0, 10)}...` : 'N/A'}</code>
+            {currentDemoAddress ? (
+              <a href={explorerAddress(activeChainId, currentDemoAddress)} target="_blank" rel="noopener noreferrer">
+                <code>{currentDemoAddress}</code>
+              </a>
+            ) : <code>N/A</code>}
+          </div>
+          <div>
+            <label>Delegate ({chain?.name || 'Local'})</label>
+            {currentDelegateAddress ? (
+              <a href={explorerAddress(activeChainId, currentDelegateAddress)} target="_blank" rel="noopener noreferrer">
+                <code>{currentDelegateAddress}</code>
+              </a>
+            ) : <code>N/A</code>}
           </div>
         </div>
       </section>
