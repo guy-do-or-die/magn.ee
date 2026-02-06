@@ -3,9 +3,14 @@
   "name": "Magnee",
   "version": "0.0.1",
   "description": "Pay with any token for any call",
+  "action": {
+    "default_popup": "settings.html",
+    "default_title": "Magnee Settings"
+  },
   "permissions": [
     "activeTab",
-    "scripting"
+    "scripting",
+    "storage"
   ],
   "host_permissions": [
     "<all_urls>"

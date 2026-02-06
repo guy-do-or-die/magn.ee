@@ -3,6 +3,17 @@ import react from '@vitejs/plugin-react';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
 import path from 'path';
 
+// Custom plugin to strip crossorigin attributes from HTML (breaks extension popups)
+function stripCrossOrigin() {
+    return {
+        name: 'strip-crossorigin',
+        enforce: 'post' as const,
+        transformIndexHtml(html: string) {
+            return html.replace(/ crossorigin/g, '');
+        }
+    };
+}
+
 export default defineConfig({
     plugins: [
         react(),
@@ -10,7 +21,8 @@ export default defineConfig({
             targets: [
                 { src: 'manifest.json', dest: '.' }
             ]
-        })
+        }),
+        stripCrossOrigin()
     ],
     resolve: {
         alias: {
@@ -21,10 +33,14 @@ export default defineConfig({
     build: {
         outDir: 'dist',
         emptyOutDir: true,
+        // Disable module preload polyfill - not needed for extensions
+        modulePreload: { polyfill: false },
         rollupOptions: {
             input: {
-                // Entries
-                popup: path.resolve(__dirname, 'src/ui/popup.html'),
+                // Settings popup (clicked from toolbar icon)
+                settings: path.resolve(__dirname, 'settings.html'),
+                // Intercept popup for transaction interception (opened by service worker)
+                intercept: path.resolve(__dirname, 'src/ui/intercept.html'),
                 serviceWorker: path.resolve(__dirname, 'src/background/serviceWorker.ts'),
                 contentScript: path.resolve(__dirname, 'src/contentScript.ts'),
                 providerWrapper: path.resolve(__dirname, 'src/injected/providerWrapper.ts')
