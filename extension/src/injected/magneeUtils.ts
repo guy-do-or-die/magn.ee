@@ -81,16 +81,11 @@ export function buildWalletSendCalls(
     return {
         method: 'wallet_sendCalls',
         params: [{
-            version: '1.0',
+            version: '2.0.0',
             chainId: `0x${chainId.toString(16)}`,
             from: fromAddress,
+            atomicRequired: true,
             calls: calls,
-            capabilities: {
-                // Request atomic execution if possible
-                atomicBatch: {
-                    supported: true
-                }
-            }
         }]
     };
 }

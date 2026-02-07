@@ -198,8 +198,9 @@ export default function App() {
             return;
         }
 
-        if (action === 'MAGNEEFY' && chosenRoute?.lifiStep) {
-            // Execute via Li.Fi SDK - handles full lifecycle including destination calls
+        if (action === 'MAGNEEFY' && chosenRoute) {
+            // Delegation management from popup (via wallet bridge — invisible to dapp)
+            // then send MAGNEEFY to dapp tab for wallet_sendCalls batched execution
             setStep('EXECUTING');
             const updateMsg = (msg: string) => {
                 console.log('[Magnee]', msg);
@@ -209,7 +210,7 @@ export default function App() {
             try {
                 updateMsg('Step 1: Creating wallet bridge...');
                 const { walletRequest, setCurrentReqId } = await import('@/lib/walletBridge');
-                setCurrentReqId(reqId!);  // Route to the correct dapp tab
+                setCurrentReqId(reqId!);
                 
                 updateMsg('Step 2: Testing wallet connection...');
                 const testResult = await walletRequest('eth_chainId');
@@ -217,54 +218,93 @@ export default function App() {
                     throw new Error(`Wallet bridge failed: ${testResult.error}`);
                 }
 
-                // Switch to source chain FIRST (before SDK init so client gets correct chain)
-                const currentChainHex = testResult.result as string;
-                const sourceChainHex = `0x${chosenRoute.chainId.toString(16)}`;
-                if (currentChainHex !== sourceChainHex) {
-                    updateMsg(`Step 2b: Switching to source chain ${chosenRoute.chainId}...`);
-                    await walletRequest('wallet_switchEthereumChain', [{ chainId: sourceChainHex }]);
-                }
+                // === Delegation Management (via wallet bridge — invisible to dapp) ===
+                const dappChainHex = testResult.result as string;
+                const dappChainId = parseInt(dappChainHex, 16);
+                const bridgeSourceChainId = chosenRoute.chainId;
 
-                // Create EIP-1193 provider for Li.Fi SDK
-                const bridgeProvider = {
-                    request: async ({ method, params }: { method: string; params?: any[] }) => {
-                        const result = await walletRequest(method, params);
-                        if (!result.ok) throw new Error(result.error || `RPC ${method} failed`);
-                        return result.result;
-                    }
+                // Helper: get code via direct HTTP RPC (no chain switch needed)
+                const RPC_URLS: Record<number, string> = {
+                    1: 'https://eth.llamarpc.com',
+                    8453: 'https://mainnet.base.org',
+                    42161: 'https://arb1.arbitrum.io/rpc',
+                    10: 'https://mainnet.optimism.io',
+                };
+                const getCode = async (addr: string, chainId: number): Promise<string> => {
+                    const rpc = RPC_URLS[chainId];
+                    if (!rpc) return '0x';
+                    try {
+                        const res = await fetch(rpc, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_getCode', params: [addr, 'latest'] })
+                        });
+                        const data = await res.json();
+                        return data.result || '0x';
+                    } catch { return '0x'; }
                 };
 
-                updateMsg('Step 3: Initializing Li.Fi SDK...');
-                const { initLiFiSDK, executeLiFiRoute } = await import('@/lib/lifi');
-                await initLiFiSDK(bridgeProvider, chosenRoute.chainId);
+                const { getDelegateAddress } = await import('@/lib/delegates');
+                const fromAddr = tx?.from;
+                if (!fromAddr) throw new Error('No from address');
 
-                updateMsg('Step 4: Executing route via Li.Fi SDK...');
-                const result = await executeLiFiRoute(chosenRoute.lifiStep, chosenRoute.lifiContractCalls, (update) => {
-                    setExecutionStatus(update);
-                    console.log('[Magnee] Li.Fi execution update:', update);
-                });
+                // 1. Source chain (bridge source): revoke if has delegation
+                const sourceCode = await getCode(fromAddr, bridgeSourceChainId);
+                if (sourceCode && sourceCode !== '0x') {
+                    updateMsg('Revoking source chain delegation...');
+                    const srcHex = `0x${bridgeSourceChainId.toString(16)}`;
+                    await walletRequest('wallet_switchEthereumChain', [{ chainId: srcHex }]);
+                    await walletRequest('eth_sendTransaction', [{
+                        from: fromAddr,
+                        to: fromAddr,
+                        value: '0x0',
+                        data: '0x',
+                        type: '0x04',
+                        authorizationList: [{ address: '0x0000000000000000000000000000000000000000', chainId: srcHex }]
+                    }]);
+                    console.log('[Magnee] Source delegation revoked ✅');
+                }
 
-                console.log('[Magnee] Li.Fi route execution complete:', result);
-                setExecutionStatus({
-                    step: 1, total: 1, status: 'done',
-                    message: 'Cross-chain execution completed!'
-                });
+                // 2. Destination chain (dapp chain): set our delegate if not present
+                const destDelegate = getDelegateAddress(dappChainId);
+                if (destDelegate) {
+                    const destCode = await getCode(fromAddr, dappChainId);
+                    const hasOurDelegate = destCode?.toLowerCase().includes(destDelegate.slice(2).toLowerCase());
+                    if (!hasOurDelegate) {
+                        updateMsg(`Setting destination delegation on chain ${dappChainId}...`);
+                        const destHex = `0x${dappChainId.toString(16)}`;
+                        await walletRequest('wallet_switchEthereumChain', [{ chainId: destHex }]);
+                        await walletRequest('eth_sendTransaction', [{
+                            from: fromAddr,
+                            to: fromAddr,
+                            value: '0x0',
+                            data: '0x',
+                            type: '0x04',
+                            authorizationList: [{ address: destDelegate, chainId: destHex }]
+                        }]);
+                        console.log('[Magnee] Destination delegation set ✅');
+                    }
+                }
 
-                // Original tx was already handled by Li.Fi bridge + contract calls
-                // REJECT the original to prevent double-execution
-                chrome.runtime.sendMessage({
-                    type: 'MAGNEE_DECISION',
-                    payload: { id: reqId, action: 'REJECT' }
-                });
-                setStep('STATUS');
+                // Switch wallet back to dapp chain before sending route to dapp tab
+                const currentChainHex = (await walletRequest('eth_chainId')).result as string;
+                const dappHex = `0x${dappChainId.toString(16)}`;
+                if (currentChainHex !== dappHex) {
+                    await walletRequest('wallet_switchEthereumChain', [{ chainId: dappHex }]);
+                }
+
+                updateMsg('Executing batched transaction...');
             } catch (err: any) {
-                console.error('[Magnee] Li.Fi execution failed:', err);
-                setExecutionStatus({
-                    step: 1, total: 1, status: 'failed',
-                    message: err?.message || 'Execution failed'
-                });
-                setStep('STATUS');
+                console.error('[Magnee] Delegation management failed:', err);
+                // Non-fatal: proceed with execution even if delegation management fails
             }
+
+            // Send MAGNEEFY to dapp tab — handleMagneefy → executeBatchedTx → wallet_sendCalls
+            chrome.runtime.sendMessage({
+                type: 'MAGNEE_DECISION',
+                payload: { id: reqId, action: 'MAGNEEFY', route: chosenRoute }
+            });
+            setStep('STATUS');
             return;
         }
 

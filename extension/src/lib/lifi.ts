@@ -199,7 +199,7 @@ export async function fetchLiFiQuote(params: LiFiQuoteRequest): Promise<LiFiQuot
         toAmount: params.toAmount,
         contractCalls: params.contractCalls,
         integrator: params.integrator || 'Magnee',
-        // Note: Stargate V2 is often the only bridge available for contractCalls routes
+        slippage: 0.03,  // 3% slippage tolerance for swap steps
     } as ContractCallsQuoteRequest;
 
     // SDK functions use global config - no client arg needed

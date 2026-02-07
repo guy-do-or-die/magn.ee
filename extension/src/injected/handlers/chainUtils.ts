@@ -1,9 +1,44 @@
 /**
- * Chain switching utilities
+ * Chain switching and cross-chain read utilities
  * Single source of truth for chain-related operations
  */
 
 export type RequestFn = (args: { method: string; params?: any[] }) => Promise<any>;
+
+/** Public RPC endpoints for direct cross-chain reads (no chain switch needed) */
+const RPC_URLS: Record<number, string> = {
+    1:     'https://eth.llamarpc.com',
+    8453:  'https://mainnet.base.org',
+    42161: 'https://arb1.arbitrum.io/rpc',
+    10:    'https://mainnet.optimism.io',
+};
+
+/**
+ * Read eth_getCode via direct HTTP RPC (no wallet interaction, no chain switch)
+ */
+export async function getCodeDirect(address: string, chainId: number): Promise<string> {
+    const rpc = RPC_URLS[chainId];
+    if (!rpc) {
+        console.warn(`[Magnee] No RPC for chain ${chainId}, skipping code check`);
+        return '0x';
+    }
+    try {
+        const res = await fetch(rpc, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                jsonrpc: '2.0', id: 1,
+                method: 'eth_getCode',
+                params: [address, 'latest']
+            })
+        });
+        const data = await res.json();
+        return data.result || '0x';
+    } catch (err) {
+        console.warn(`[Magnee] getCode RPC failed for chain ${chainId}:`, err);
+        return '0x';
+    }
+}
 
 /**
  * Ensure wallet is on the target chain, switching if necessary

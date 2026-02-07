@@ -4,8 +4,9 @@
  */
 
 import { createMagneefiedTx, buildWalletSendCalls, getCallsFromRoute, type Route } from '../magneeUtils';
-import { ensureChain, sanitizeTx, type RequestFn } from './chainUtils';
+import { ensureChain, getCodeDirect, sanitizeTx, type RequestFn } from './chainUtils';
 import { requestFromBackground, type MagneeResponse } from './messaging';
+import { getDelegateAddress } from '../../lib/delegates';
 
 /**
  * Wait for a transaction to be confirmed
@@ -94,6 +95,76 @@ async function executeBatchedTx(
 }
 
 /**
+ * Ensure delegation state is correct before executing cross-chain tx.
+ * - Source chain: revoke delegation if non-zero (prevents wallet_sendCalls conflicts)
+ * - Destination chain: set MagneeDelegateAccount if not already delegated
+ */
+async function ensureDelegations(
+    fromAddress: string,
+    sourceChainId: number,
+    destChainId: number,
+    requestFn: RequestFn
+): Promise<void> {
+    // 1. Check source chain: revoke if has any delegation
+    const sourceCode = await getCodeDirect(fromAddress, sourceChainId);
+    if (sourceCode && sourceCode !== '0x') {
+        console.log('[Magnee] Source chain has delegation, revoking to 0x0...');
+        await ensureChain(requestFn, sourceChainId);
+        await requestFn({
+            method: 'eth_sendTransaction',
+            params: [{
+                from: fromAddress,
+                to: fromAddress,
+                value: '0x0',
+                data: '0x',
+                type: '0x04',
+                authorizationList: [{
+                    address: '0x0000000000000000000000000000000000000000',
+                    chainId: `0x${sourceChainId.toString(16)}`
+                }]
+            }]
+        });
+        console.log('[Magnee] Source delegation revoked ✅');
+    } else {
+        console.log('[Magnee] Source chain clean (no delegation)');
+    }
+
+    // 2. Check destination chain: set our delegate if not present
+    const destDelegate = getDelegateAddress(destChainId);
+    if (!destDelegate) {
+        console.log(`[Magnee] No delegate deployed for dest chain ${destChainId}, skipping`);
+        return;
+    }
+
+    const destCode = await getCodeDirect(fromAddress, destChainId);
+    const hasOurDelegate = destCode?.toLowerCase().includes(
+        destDelegate.slice(2).toLowerCase()
+    );
+
+    if (!hasOurDelegate) {
+        console.log(`[Magnee] Destination needs delegation to ${destDelegate}, setting...`);
+        await ensureChain(requestFn, destChainId);
+        await requestFn({
+            method: 'eth_sendTransaction',
+            params: [{
+                from: fromAddress,
+                to: fromAddress,
+                value: '0x0',
+                data: '0x',
+                type: '0x04',
+                authorizationList: [{
+                    address: destDelegate,
+                    chainId: `0x${destChainId.toString(16)}`
+                }]
+            }]
+        });
+        console.log('[Magnee] Destination delegation set ✅');
+    } else {
+        console.log('[Magnee] Destination already has our delegation ✅');
+    }
+}
+
+/**
  * Handle MAGNEEFY action - execute the modified transaction
  */
 async function handleMagneefy(
@@ -105,6 +176,8 @@ async function handleMagneefy(
     console.log('[Magnee] User chose to Magneefy!');
 
     // Switch to target chain if needed
+    // NOTE: Delegation management is handled in the popup via wallet bridge
+    // to avoid Chain Switch Wars (Aave etc. revert wallet_switchEthereumChain)
     if (route?.chainId) {
         await ensureChain(requestFn, route.chainId);
     }

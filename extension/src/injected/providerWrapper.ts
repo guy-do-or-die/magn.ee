@@ -44,43 +44,68 @@ function wrapProvider(provider: EthereumProvider): EthereumProvider {
     originals.push({ request: originalRequest, provider });
     (window as any).__magneeOriginalProviders = originals;
 
-    // Override request method
+    // Processing lock: prevents re-interception while Magnee handles a tx
+    // (MetaMask's wallet_sendCalls fallback calls this.request() internally)
+    let processing = false;
+
+    // Override request method — only intercept eth_sendTransaction
     provider.request = async function (args: { method: string; params?: any[] }) {
-        console.log('[Magnee] Intercepted request:', args);
-
-        // Only intercept eth_sendTransaction
-        if (args.method === 'eth_sendTransaction') {
-            const tx = args.params?.[0];
-            
-            // Pass through EIP-7702 delegation/revocation transactions
-            if (tx?.type === '0x04') {
-                console.log('[Magnee] 7702 tx — passing through');
-                return originalRequest(args);
+        // Fast path: everything except eth_sendTransaction goes straight through
+        if (args.method !== 'eth_sendTransaction') {
+            // Block dapp chain switches while Magnee is processing
+            // (prevents Aave etc. from reverting Magnee's chain switches)
+            // Wallet bridge sets __magneeFromBridge=true to bypass this
+            if (processing && args.method === 'wallet_switchEthereumChain' 
+                && !(window as any).__magneeFromBridge) {
+                console.log('[Magnee] Suppressing dapp chain switch during processing');
+                return null;
             }
-
-            try {
-                // Check if this is a payable transaction
-                if (tx && tx.value && BigInt(tx.value) > 0n) {
-                    const chainId = await getCurrentChainId(originalRequest);
-                    return handlePayableTransaction(tx, chainId, args, originalRequest);
-                } else {
-                    console.log('[Magnee] Tx skipped: No value or value is 0', tx?.value);
-                }
-            } catch (err) {
-                console.error('[Magnee] Interception logic failed:', err);
+            const result = await originalRequest(args);
+            // Track which provider has accounts → mark as active for Settings relay
+            if ((args.method === 'eth_accounts' || args.method === 'eth_requestAccounts') 
+                && Array.isArray(result) && result.length > 0) {
+                (window as any).__magneeActiveProvider = provider;
             }
+            return result;
         }
 
-        // Forward all other requests unchanged
-        const result = await originalRequest(args);
+        // === eth_sendTransaction interception ===
+        const tx = args.params?.[0];
+        console.log('[Magnee] Intercepted eth_sendTransaction:', tx);
 
-        // Track which provider has accounts → mark as active for Settings relay
-        if ((args.method === 'eth_accounts' || args.method === 'eth_requestAccounts') 
-            && Array.isArray(result) && result.length > 0) {
-            (window as any).__magneeActiveProvider = provider;
+        // Already processing a Magnee tx → pass through (batch/fallback call)
+        if (processing) {
+            console.log('[Magnee] Already processing — passing through');
+            return originalRequest(args);
         }
 
-        return result;
+        // Pass through EIP-7702 delegation/revocation transactions
+        if (tx?.type === '0x04') {
+            console.log('[Magnee] 7702 tx — passing through');
+            return originalRequest(args);
+        }
+
+        try {
+            if (tx && tx.value && BigInt(tx.value) > 0n) {
+                processing = true;
+                const chainId = await getCurrentChainId(originalRequest);
+                return await handlePayableTransaction(tx, chainId, args, originalRequest);
+            } else {
+                console.log('[Magnee] Tx skipped: No value or value is 0', tx?.value);
+            }
+        } catch (err: any) {
+            // User rejected via Magnee popup → propagate to dapp (don't send original tx)
+            if (err?.message?.includes('User rejected')) {
+                console.log('[Magnee] User rejected — suppressing original tx');
+                throw err;
+            }
+            // Unexpected error → fall through to send original tx
+            console.error('[Magnee] Interception logic failed, forwarding original:', err);
+        } finally {
+            processing = false;
+        }
+
+        return originalRequest(args);
     };
 
     // Install direct execution listener (once globally)
