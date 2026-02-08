@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Button } from '@magnee/ui/components/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@magnee/ui/components/card'
 import { Badge } from '@/components/ui/badge'
@@ -10,10 +10,12 @@ import { Search, Loader2, ExternalLink, CheckCircle, XCircle, AlertTriangle, Arr
 import { CHAIN_META, getChainMeta } from '@/lib/constants'
 import { analyzeTransaction, type TxAnalysis } from '@/lib/explorer'
 import { shortenAddress } from '@/lib/utils'
+import { useSearchParams } from 'react-router-dom'
 
 export function Explorer() {
-  const [txHash, setTxHash] = useState('')
-  const [chainName, setChainName] = useState('arb')
+  const [searchParams] = useSearchParams()
+  const [txHash, setTxHash] = useState(searchParams.get('tx') ?? '')
+  const [chainName, setChainName] = useState(searchParams.get('chain') ?? 'arb')
   const [destChainName, setDestChainName] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -34,6 +36,13 @@ export function Explorer() {
       setLoading(false)
     }
   }
+
+  // Auto-search when opened via deep link (?tx=...&chain=...)
+  useEffect(() => {
+    if (searchParams.get('tx')) {
+      handleSearch()
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="fade-up mx-auto max-w-4xl px-6 pb-16 pt-28">

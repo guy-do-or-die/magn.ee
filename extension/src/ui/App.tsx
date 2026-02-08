@@ -26,9 +26,11 @@ export default function App() {
     const [reqId, setReqId] = useState<string | null>(null);
     const [step, setStep] = useState<Step>('CONFIG');
 
+    // State for Configurator
     const [sourceChainId, setSourceChainId] = useState<number>(DEFAULT_SOURCE_CHAIN_ID);
     const [sourceTokenAddress, setSourceTokenAddress] = useState<string>('');
 
+    // Hooks
     const {
         loading: quotesLoading,
         error: quotesError,
@@ -46,6 +48,7 @@ export default function App() {
 
     const [selectedRoute, setSelectedRoute] = useState<Route | null>(null);
 
+    // Execution tracking state
     const [executionStatus, setExecutionStatus] = useState<ExecutionStatus>({
         step: 0,
         total: 0,
@@ -95,6 +98,11 @@ export default function App() {
                         links.push({ label: `Destination on ${getExplorerName(destChainId)}`, url: addressUrl });
                     }
                 }
+                if (txHash && sourceChainId) {
+                    const chainKeys: Record<number, string> = { 1: 'eth', 42161: 'arb', 8453: 'base', 10: 'opt' };
+                    const chainKey = chainKeys[sourceChainId] ?? String(sourceChainId);
+                    links.push({ label: 'Full trace on magn.ee', url: `https://magn.ee/explorer?tx=${txHash}&chain=${chainKey}` });
+                }
                 
                 setExecutionStatus(prev => ({
                     ...prev,
@@ -123,9 +131,12 @@ export default function App() {
         }
     }, [originalChainId]);
 
+    // Initialize SDK with bridge provider (window.ethereum doesn't exist in extension popups)
     useEffect(() => {
         const init = async () => {
             try {
+                // Create EIP-1193 provider that proxies calls through walletBridge
+                // (which uses chrome.scripting.executeScript to reach the active tab's wallet)
                 const { walletRequest } = await import('@/lib/walletBridge');
                 const bridgeProvider = {
                     request: async ({ method, params }: { method: string; params?: any[] }) => {
@@ -135,11 +146,13 @@ export default function App() {
                     }
                 };
 
+                // Get original chain for restoration
                 const chainIdHex = await bridgeProvider.request({ method: 'eth_chainId' });
                 const chainId = parseInt(chainIdHex as string, 16);
                 setOriginalChainId(chainId);
                 console.log('[Magnee] Saved original chain:', chainId);
 
+                // Initialize Li.Fi SDK with bridge provider
                 initLiFiSDK(bridgeProvider);
             } catch (err) {
                 console.warn('[Magnee] Failed to init SDK:', err);
@@ -148,6 +161,7 @@ export default function App() {
         init();
     }, []);
 
+    // Load TX details
     useEffect(() => {
         const queryParams = new URLSearchParams(window.location.search);
         const id = queryParams.get('id');
@@ -172,13 +186,15 @@ export default function App() {
                 const defaultChain = isSupported ? detectedChainId : DEFAULT_SOURCE_CHAIN_ID;
 
                 setSourceChainId(defaultChain);
-                setSourceTokenAddress(ZERO_ADDRESS);
+                setSourceTokenAddress(ZERO_ADDRESS); // Default Native ETH
             }
             setLoading(false);
         });
     }, []);
 
     const handleFetchQuotes = async () => {
+        // Safety Check: Ensure Source Chain matches Token Chain
+        // This prevents the "Impossible State" where we try to use an OP token on Base
         const tokenConfig = POPULAR_TOKENS.find(t => t.address === sourceTokenAddress);
         let effectiveChainId = sourceChainId;
 
@@ -209,13 +225,17 @@ export default function App() {
         setSelectedRoute(r);
         setStep('CONFIRM');
 
+        // Check Approval Logic - skip if 7702 batching is available
         if (tx && tx.from && r.strategy === 'LIFI_BRIDGE') {
+            // Import delegation check
             const { supportsDelegation } = await import('@/lib/delegates');
             
+            // If chain supports 7702 AND we have approvalTx, we'll batch it - no separate approval needed
             if (r.approvalTx && supportsDelegation(r.chainId)) {
                 console.log('[Magnee] 7702 batching available - skipping separate approval step');
                 setNeedsApproval(false);
             } else {
+                // Standard flow: check allowance and prompt for approval if needed
                 const hasAllowance = await checkAllowance(r.tokenIn, tx.from, r.targetAddress || '', BigInt(r.amountIn));
                 setNeedsApproval(!hasAllowance);
                 console.log('[Magnee] Route Selection - Needs Approval?', !hasAllowance);
@@ -257,7 +277,7 @@ export default function App() {
             try {
                 updateMsg('Creating wallet bridge...');
                 const { walletRequest, setCurrentReqId } = await import('@/lib/walletBridge');
-                setCurrentReqId(reqId!);
+                setCurrentReqId(reqId!);  // Route to the correct dapp tab
                 
                 updateMsg('Testing wallet connection...');
                 const testResult = await walletRequest('eth_chainId');
@@ -355,6 +375,7 @@ export default function App() {
             return;
         }
 
+        // Fallback: send raw calldata to content script for execution
         chrome.runtime.sendMessage({
             type: 'MAGNEE_DECISION',
             payload: { id: reqId, action, route: chosenRoute }

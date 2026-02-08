@@ -104,7 +104,12 @@ const status = (ok: boolean) => ok ? c.green('✅') : c.red('❌')
 
 // ── Signature Resolution via Foundry (cast 4byte / cast 4byte-event) ────────
 
-const sigCache = new Map<string, string>()
+// keccak256("Executed(address,uint256,bool)") — emitted by MagneeDelegateAccount
+const EXECUTED_EVENT_TOPIC = '0x8d164b427e1fdbcdd4488310c98a30b974353972048528fdd1c459fe0961b2c7'
+
+const sigCache = new Map<string, string>([
+  [EXECUTED_EVENT_TOPIC, 'Executed'],
+])
 
 async function castLookup(selector: string, type: 'event' | 'function'): Promise<string> {
   const key = `${type}:${selector}`
@@ -196,8 +201,8 @@ function analyzeTargetExecution(
 
     const name = eventNames.get(topic0) ?? topic0.slice(0, 10)
 
-    // Detect delegate execution on user's EOA
-    if (addr === USER_EOA.toLowerCase() && ['Executed', 'ExecutionSuccess', 'CallExecuted'].includes(name)) {
+    // Match by known topic hash — 4byte lookups may not have this event registered
+    if (addr === USER_EOA.toLowerCase() && topic0.toLowerCase() === EXECUTED_EVENT_TOPIC) {
       delegateExecuted = true
     }
 

@@ -1,5 +1,5 @@
 import { createPublicClient, http, formatEther, formatUnits, type Chain, type Hex, type TransactionReceipt } from 'viem'
-import { SUPPORTED_CHAINS, DELEGATE_ADDRS, USER_EOA, BRIDGE_EVENT_NAMES, resolveChain, txUrl, addressUrl } from './constants'
+import { SUPPORTED_CHAINS, DELEGATE_ADDRS, USER_EOA, BRIDGE_EVENT_NAMES, EXECUTED_EVENT_TOPIC, resolveChain, txUrl, addressUrl } from './constants'
 
 // ── Types ──
 
@@ -79,7 +79,9 @@ function clientFor(chain: Chain) {
 
 // ── 4byte Lookup (public API) ──
 
-const sigCache = new Map<string, string>()
+const sigCache = new Map<string, string>([
+  [EXECUTED_EVENT_TOPIC, 'Executed'],
+])
 
 async function lookup4byte(selector: string): Promise<string> {
   if (sigCache.has(selector)) return sigCache.get(selector)!
@@ -171,7 +173,8 @@ function analyzeTargetExecution(
     if (!topic0) continue
     const name = eventNames.get(topic0) ?? topic0.slice(0, 10)
 
-    if (addr === USER_EOA.toLowerCase() && ['Executed', 'ExecutionSuccess', 'CallExecuted'].includes(name)) {
+    // Match by known topic hash — 4byte.directory may not have this event registered
+    if (addr === USER_EOA.toLowerCase() && topic0.toLowerCase() === EXECUTED_EVENT_TOPIC) {
       delegateExecuted = true
     }
 
