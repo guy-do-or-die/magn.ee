@@ -14,13 +14,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
       - uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
         run: bun install
 
       - name: Build extension
-        run: cd extension && bunx tsc && bunx vite build
+        working-directory: extension
+        run: bunx vite build
 
       - name: Package extension
         run: |
