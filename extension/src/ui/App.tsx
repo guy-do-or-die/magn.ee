@@ -333,6 +333,7 @@ export default function App() {
 
                             {step === 'CONFIG' && (
                                 <QuoteConfigurator
+                                    walletAddress={tx?.from || null}
                                     sourceChainId={sourceChainId}
                                     setSourceChainId={setSourceChainId}
                                     sourceTokenAddress={sourceTokenAddress}
