@@ -19,7 +19,8 @@
     "noUncheckedIndexedAccess": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@magnee/ui/*": ["../packages/ui/*"]
     }
   },
   "include": ["src"]

@@ -1,4 +1,4 @@
-import { Button } from '@/components/ui/button'
+import { Button } from '@magnee/ui/components/button'
 import { Download, Chrome } from 'lucide-react'
 
 export function DownloadCTA() {

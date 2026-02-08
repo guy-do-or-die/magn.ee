@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
+import { Button } from '@magnee/ui/components/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@magnee/ui/components/card';
 
+import { Header } from './components/Header';
 import { PaymentRequestHeader } from './features/PaymentRequestHeader';
 import { QuoteConfigurator } from './features/QuoteConfigurator';
 import { QuoteList } from './features/QuoteList';
@@ -25,11 +26,9 @@ export default function App() {
     const [reqId, setReqId] = useState<string | null>(null);
     const [step, setStep] = useState<Step>('CONFIG');
 
-    // State for Configurator
     const [sourceChainId, setSourceChainId] = useState<number>(DEFAULT_SOURCE_CHAIN_ID);
     const [sourceTokenAddress, setSourceTokenAddress] = useState<string>('');
 
-    // Hooks
     const {
         loading: quotesLoading,
         error: quotesError,
@@ -47,7 +46,6 @@ export default function App() {
 
     const [selectedRoute, setSelectedRoute] = useState<Route | null>(null);
 
-    // Execution tracking state
     const [executionStatus, setExecutionStatus] = useState<ExecutionStatus>({
         step: 0,
         total: 0,
@@ -55,10 +53,8 @@ export default function App() {
         message: ''
     });
 
-    // Original chain for restoration on close/back
     const [originalChainId, setOriginalChainId] = useState<number | null>(null);
 
-    // Function to restore original chain
     const restoreOriginalChain = useCallback(async () => {
         if (originalChainId) {
             try {
@@ -71,12 +67,9 @@ export default function App() {
         }
     }, [originalChainId]);
 
-    // Initialize SDK with bridge provider (window.ethereum doesn't exist in extension popups)
     useEffect(() => {
         const init = async () => {
             try {
-                // Create EIP-1193 provider that proxies calls through walletBridge
-                // (which uses chrome.scripting.executeScript to reach the active tab's wallet)
                 const { walletRequest } = await import('@/lib/walletBridge');
                 const bridgeProvider = {
                     request: async ({ method, params }: { method: string; params?: any[] }) => {
@@ -86,13 +79,11 @@ export default function App() {
                     }
                 };
 
-                // Get original chain for restoration
                 const chainIdHex = await bridgeProvider.request({ method: 'eth_chainId' });
                 const chainId = parseInt(chainIdHex as string, 16);
                 setOriginalChainId(chainId);
                 console.log('[Magnee] Saved original chain:', chainId);
 
-                // Initialize Li.Fi SDK with bridge provider
                 initLiFiSDK(bridgeProvider);
             } catch (err) {
                 console.warn('[Magnee] Failed to init SDK:', err);
@@ -101,7 +92,6 @@ export default function App() {
         init();
     }, []);
 
-    // Load TX details
     useEffect(() => {
         const queryParams = new URLSearchParams(window.location.search);
         const id = queryParams.get('id');
@@ -126,15 +116,13 @@ export default function App() {
                 const defaultChain = isSupported ? detectedChainId : DEFAULT_SOURCE_CHAIN_ID;
 
                 setSourceChainId(defaultChain);
-                setSourceTokenAddress(ZERO_ADDRESS); // Default Native ETH
+                setSourceTokenAddress(ZERO_ADDRESS);
             }
             setLoading(false);
         });
     }, []);
 
     const handleFetchQuotes = async () => {
-        // Safety Check: Ensure Source Chain matches Token Chain
-        // This prevents the "Impossible State" where we try to use an OP token on Base
         const tokenConfig = POPULAR_TOKENS.find(t => t.address === sourceTokenAddress);
         let effectiveChainId = sourceChainId;
 
@@ -165,17 +153,13 @@ export default function App() {
         setSelectedRoute(r);
         setStep('CONFIRM');
 
-        // Check Approval Logic - skip if 7702 batching is available
         if (tx && tx.from && r.strategy === 'LIFI_BRIDGE') {
-            // Import delegation check
             const { supportsDelegation } = await import('@/lib/delegates');
             
-            // If chain supports 7702 AND we have approvalTx, we'll batch it - no separate approval needed
             if (r.approvalTx && supportsDelegation(r.chainId)) {
                 console.log('[Magnee] 7702 batching available - skipping separate approval step');
                 setNeedsApproval(false);
             } else {
-                // Standard flow: check allowance and prompt for approval if needed
                 const hasAllowance = await checkAllowance(r.tokenIn, tx.from, r.targetAddress || '', BigInt(r.amountIn));
                 setNeedsApproval(!hasAllowance);
                 console.log('[Magnee] Route Selection - Needs Approval?', !hasAllowance);
@@ -308,7 +292,6 @@ export default function App() {
             return;
         }
 
-        // Fallback: send raw calldata to content script for execution
         chrome.runtime.sendMessage({
             type: 'MAGNEE_DECISION',
             payload: { id: reqId, action, route: chosenRoute }
@@ -321,104 +304,121 @@ export default function App() {
         triggerApproval(tx.from, selectedRoute, reqId);
     };
 
-    if (loading) return <div className="p-8 text-center">Loading...</div>;
+    const isTerminal = step === 'STATUS';
 
-    // Global Error Layout
-    if (error || quotesError) return (
-        <div className="p-4 bg-red-50 text-red-600">
-            <h3 className="font-bold">Error</h3>
-            <p>{error || quotesError}</p>
-            <Button variant="outline" onClick={() => { setError(null); setStep('CONFIG'); }} className="mt-4">Back</Button>
-        </div>
-    );
+    if (loading) return <div className="flex h-full items-center justify-center bg-background text-muted-foreground">Loading...</div>;
 
     return (
-        <div className="flex h-full w-full flex-col bg-gray-50 font-sans antialiased overflow-hidden">
-            <Card className="flex h-full flex-col border-none shadow-none rounded-none">
-                <CardHeader className="bg-white pb-3 pt-5 text-center border-b shrink-0">
-                    <CardTitle className="text-lg flex items-center justify-center gap-2">
-                        <img src="/icons/128.png" className="w-6 h-6" /> Magnee
-                    </CardTitle>
-                    <CardDescription className="text-xs">Payment Interceptor</CardDescription>
+        <div className="flex h-full w-full flex-col bg-background font-sans antialiased overflow-hidden">
+            <Card className="flex h-full flex-col border-none shadow-none rounded-none bg-background">
+                <CardHeader className="bg-card/80 backdrop-blur-sm pb-3 pt-5 border-b border-border shrink-0">
+                    <Header />
                 </CardHeader>
 
-                <CardContent className="flex-1 overflow-y-auto bg-gray-50/50 p-4 space-y-4">
+                <CardContent className="flex-1 overflow-y-auto p-4 space-y-4">
 
-                    <PaymentRequestHeader tx={tx} />
-
-                    {step === 'CONFIG' && (
-                        <QuoteConfigurator
-                            sourceChainId={sourceChainId}
-                            setSourceChainId={setSourceChainId}
-                            sourceTokenAddress={sourceTokenAddress}
-                            setSourceTokenAddress={setSourceTokenAddress}
-                            onFetchQuotes={handleFetchQuotes}
-                        />
-                    )}
-
-                    {step === 'LOADING' && (
-                        <div className="flex flex-col items-center justify-center py-12 space-y-3">
-                            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
-                            <p className="text-sm text-gray-500">Searching for best routes...</p>
-                        </div>
-                    )}
-
-                    {step === 'SELECT' && (
-                        <QuoteList
-                            routes={routes}
-                            onSelectRoute={handleSelectRoute}
-                            onBack={() => { restoreOriginalChain(); setStep('CONFIG'); }}
-                        />
-                    )}
-
-                    {step === 'CONFIRM' && selectedRoute && (
-                        <QuoteReview
-                            tx={tx}
-                            selectedRoute={selectedRoute}
-                            needsApproval={needsApproval}
-                            approving={approving}
-                            onApprove={handleApprove}
-                            onConfirm={() => handleDecision('MAGNEEFY')}
-                            onBack={() => { restoreOriginalChain(); setStep('SELECT'); }}
-                        />
-                    )}
-
-                    {step === 'STATUS' && (
-                        <div className="flex flex-col items-center justify-center py-8 space-y-4 text-center">
-                            <ExecutionProgress status={executionStatus} />
-                            <div>
-                                <h3 className="text-lg font-bold text-gray-900">
-                                    {executionStatus.status === 'done' ? 'Complete!' : 'Check your Wallet'}
-                                </h3>
-                                {executionStatus.status !== 'done' && (
-                                    <p className="text-sm text-gray-500 mt-1">Please sign the transaction in your wallet to proceed.</p>
-                                )}
-                            </div>
-                            <Button onClick={() => { restoreOriginalChain(); window.close(); }} variant="outline" className="mt-4">
-                                Close
+                    {(error || quotesError) && (
+                        <div className="p-3 rounded-xl border border-destructive/30 bg-destructive/10 text-sm">
+                            <p className="font-medium text-destructive">Something went wrong</p>
+                            <p className="text-muted-foreground mt-1 text-xs wrap-break-word">{error || quotesError}</p>
+                            <Button variant="outline" size="sm" onClick={() => { setError(null); setStep('CONFIG'); }} className="mt-3">
+                                Try Again
                             </Button>
                         </div>
                     )}
 
+                    {!error && !quotesError && (
+                        <>
+                            <PaymentRequestHeader tx={tx} />
+
+                            {step === 'CONFIG' && (
+                                <QuoteConfigurator
+                                    sourceChainId={sourceChainId}
+                                    setSourceChainId={setSourceChainId}
+                                    sourceTokenAddress={sourceTokenAddress}
+                                    setSourceTokenAddress={setSourceTokenAddress}
+                                    onFetchQuotes={handleFetchQuotes}
+                                />
+                            )}
+
+                            {step === 'LOADING' && (
+                                <div className="flex flex-col items-center justify-center py-12 space-y-3">
+                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                                    <p className="text-sm text-muted-foreground">Searching for best routes...</p>
+                                </div>
+                            )}
+
+                            {step === 'SELECT' && (
+                                <QuoteList
+                                    routes={routes}
+                                    onSelectRoute={handleSelectRoute}
+                                    onBack={() => { restoreOriginalChain(); setStep('CONFIG'); }}
+                                />
+                            )}
+
+                            {step === 'CONFIRM' && selectedRoute && (
+                                <QuoteReview
+                                    tx={tx}
+                                    selectedRoute={selectedRoute}
+                                    needsApproval={needsApproval}
+                                    approving={approving}
+                                    onApprove={handleApprove}
+                                    onConfirm={() => handleDecision('MAGNEEFY')}
+                                    onBack={() => { restoreOriginalChain(); setStep('SELECT'); }}
+                                />
+                            )}
+
+                            {step === 'EXECUTING' && (
+                                <div className="flex flex-col items-center justify-center py-8 space-y-4 text-center">
+                                    <ExecutionProgress status={executionStatus} />
+                                    <p className="text-sm text-muted-foreground">
+                                        {executionStatus.status === 'pending'
+                                            ? 'Please sign the transaction in your wallet.'
+                                            : 'Processing...'}
+                                    </p>
+                                </div>
+                            )}
+
+                            {step === 'STATUS' && (
+                                <div className="flex flex-col items-center justify-center py-8 space-y-4 text-center">
+                                    <ExecutionProgress status={executionStatus} />
+                                </div>
+                            )}
+                        </>
+                    )}
+
                 </CardContent>
 
-                <CardFooter className="flex-col gap-2.5 bg-white border-t p-4 shrink-0 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-10">
-                    <Button
-                        variant="ghost"
-                        className="w-full text-gray-500 hover:bg-gray-50 h-8 text-xs"
-                        onClick={() => handleDecision('CONTINUE')}
-                    >
-                        Skip & Pass Original
-                    </Button>
-                    <Button
-                        variant="ghost"
-                        className="w-full text-red-400 hover:text-red-500 h-6 text-[10px]"
-                        onClick={() => handleDecision('REJECT')}
-                    >
-                        Reject Transaction
-                    </Button>
+                <CardFooter className="flex-col gap-2 bg-card/80 backdrop-blur-sm border-t border-border p-4 shrink-0 z-10">
+                    {isTerminal ? (
+                        <Button
+                            variant="outline"
+                            className="w-full"
+                            onClick={() => { restoreOriginalChain(); window.close(); }}
+                        >
+                            Close
+                        </Button>
+                    ) : (
+                        <>
+                            <Button
+                                variant="ghost"
+                                className="w-full text-muted-foreground h-8 text-xs"
+                                onClick={() => handleDecision('CONTINUE')}
+                            >
+                                Skip & Pass Original
+                            </Button>
+                            <Button
+                                variant="ghost"
+                                className="w-full text-destructive/70 hover:text-destructive h-6 text-[10px]"
+                                onClick={() => handleDecision('REJECT')}
+                            >
+                                Reject Transaction
+                            </Button>
+                        </>
+                    )}
                 </CardFooter>
             </Card>
         </div>
     );
 }
+

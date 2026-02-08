@@ -19,14 +19,16 @@ export default defineConfig({
         react(),
         viteStaticCopy({
             targets: [
-                { src: 'manifest.json', dest: '.' }
+                { src: 'manifest.json', dest: '.' },
+                { src: 'icons/*', dest: 'icons' }
             ]
         }),
         stripCrossOrigin()
     ],
     resolve: {
         alias: {
-            '@': path.resolve(__dirname, './src')
+            '@': path.resolve(__dirname, './src'),
+            '@magnee/ui': path.resolve(__dirname, '../packages/ui')
         }
     },
     base: './',

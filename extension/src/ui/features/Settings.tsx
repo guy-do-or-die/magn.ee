@@ -1,21 +1,25 @@
 import { useState, useEffect, useCallback } from 'react';
 import delegateAddresses from '@/lib/delegates.json';
-import { Button } from '@/components/ui/button';
-import { cn } from '@/lib/utils';
+import { Button } from '@magnee/ui/components/button';
+import { Switch } from '@magnee/ui/components/switch';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@magnee/ui/components/accordion';
+import { cn } from '@magnee/ui/lib/utils';
+import { Header } from '../components/Header';
 import { getAccounts, walletRequest, switchChain } from '@/lib/walletBridge';
+import { Link2, Settings as SettingsIcon } from 'lucide-react';
 
 // Chain configuration with RPC URLs for on-chain checks
 const SUPPORTED_CHAINS = [
-    { id: 10, name: 'Optimism', color: 'bg-red-500', rpc: 'https://mainnet.optimism.io' },
-    { id: 8453, name: 'Base', color: 'bg-blue-500', rpc: 'https://mainnet.base.org' },
-    { id: 42161, name: 'Arbitrum', color: 'bg-cyan-500', rpc: 'https://arb1.arbitrum.io/rpc' },
+    { id: 10, name: 'Optimism', rpc: 'https://mainnet.optimism.io' },
+    { id: 8453, name: 'Base', rpc: 'https://mainnet.base.org' },
+    { id: 42161, name: 'Arbitrum', rpc: 'https://arb1.arbitrum.io/rpc' },
 ];
 
 type DelegationState = 'unknown' | 'pending' | 'delegated' | 'delegated_other' | 'not_delegated';
 
 interface ChainDelegation {
     state: DelegationState;
-    delegatedTo?: string; // address if delegated_other
+    delegatedTo?: string;
 }
 
 interface DelegationStatus {
@@ -26,9 +30,23 @@ export function Settings() {
     const [walletAddress, setWalletAddress] = useState<string | null>(null);
     const [delegationStatus, setDelegationStatus] = useState<DelegationStatus>({});
     const [pendingChain, setPendingChain] = useState<number | null>(null);
-
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
+
+    // Interception toggle
+    const [interceptionEnabled, setInterceptionEnabled] = useState(true);
+
+    // Load interception setting
+    useEffect(() => {
+        chrome.storage.local.get(['interceptionEnabled'], (result) => {
+            setInterceptionEnabled(result.interceptionEnabled !== false);
+        });
+    }, []);
+
+    const handleInterceptionToggle = useCallback((checked: boolean) => {
+        setInterceptionEnabled(checked);
+        chrome.storage.local.set({ interceptionEnabled: checked });
+    }, []);
 
     /**
      * Check if address has 7702 delegation on a specific chain via direct RPC
@@ -226,21 +244,21 @@ export function Settings() {
     function getStatusBadge(chainId: number) {
         const d = delegationStatus[chainId] || { state: 'unknown' };
         const styles: Record<DelegationState, string> = {
-            delegated: 'bg-green-500/20 text-green-400',
-            delegated_other: 'bg-amber-500/20 text-amber-400',
-            pending: 'bg-yellow-500/20 text-yellow-400',
-            not_delegated: 'bg-white/5 text-slate-500',
-            unknown: 'bg-white/5 text-slate-600',
+            delegated: 'badge-success',
+            delegated_other: 'badge-warning',
+            pending: 'bg-amber-500/15 text-amber-400 border-amber-500/25',
+            not_delegated: 'bg-secondary text-muted-foreground border-border',
+            unknown: 'bg-secondary text-muted-foreground border-border',
         };
         const labels: Record<DelegationState, string> = {
-            delegated: '✓ Active',
-            delegated_other: '⚠ Other',
-            pending: '⏳ Pending',
+            delegated: 'Active',
+            delegated_other: 'Other',
+            pending: 'Pending',
             not_delegated: '—',
             unknown: '...',
         };
         return (
-            <span className={cn('text-xs px-2 py-0.5 rounded font-mono', styles[d.state])}>
+            <span className={cn('text-xs px-2 py-0.5 rounded-md border font-mono', styles[d.state])}>
                 {labels[d.state]}
             </span>
         );
@@ -249,27 +267,34 @@ export function Settings() {
     const isActive = !!walletAddress;
 
     return (
-        <div className="w-full min-w-[320px] max-w-[400px] min-h-fit p-5 bg-linear-to-br from-slate-900 to-slate-800 text-white">
-            {/* Header */}
-            <header className="text-center mb-5">
-                <h1 className="text-2xl font-bold bg-linear-to-r from-cyan-400 to-purple-500 bg-clip-text text-transparent">
-                    ⚡ Magnee
-                </h1>
-                <p className="text-sm text-slate-400 mt-1">Cross-Chain Payment Interceptor</p>
-            </header>
+        <div className="w-full p-5 bg-background text-foreground">
+            <Header />
+
+            {/* Intercept Toggle - Centered */}
+            <div className="flex items-center justify-center gap-2.5 mb-6">
+                <Switch 
+                    checked={interceptionEnabled} 
+                    onCheckedChange={handleInterceptionToggle}
+                    className={cn(
+                        "data-[state=checked]:bg-primary",
+                        !interceptionEnabled && "data-[state=unchecked]:bg-destructive"
+                    )}
+                />
+                <span className="text-foreground/80 font-medium">Intercept</span>
+            </div>
 
             {/* Error */}
             {error && (
-                <div className="bg-red-500/20 border border-red-500/30 rounded-lg p-3 mb-4 text-sm text-red-300">
+                <div className="badge-error rounded-xl p-3 mb-4 text-sm border">
                     {error}
                 </div>
             )}
 
             {loading ? (
-                <p className="text-center text-slate-500 text-sm py-6">Checking wallet...</p>
+                <p className="text-center text-muted-foreground text-sm py-6">Checking wallet...</p>
             ) : !isActive ? (
                 <section className="text-center py-6">
-                    <p className="text-slate-500 text-sm leading-relaxed">
+                    <p className="text-muted-foreground text-sm leading-relaxed">
                         Open a web3 app with a connected wallet,<br />
                         then reopen this popup.
                     </p>
@@ -277,70 +302,97 @@ export function Settings() {
             ) : (
                 <>
                     {/* Address */}
-                    <section className="bg-white/5 rounded-lg p-3 mb-5">
-                        <code className="text-cyan-400 text-sm">
+                    <section className="glass-card rounded-xl p-3 mb-5">
+                        <code className="text-primary text-sm">
                             {walletAddress?.slice(0, 6)}...{walletAddress?.slice(-4)}
                         </code>
                     </section>
 
-                    {/* Delegation */}
-                    <section className="mb-2">
-                        <h2 className="text-base font-semibold mb-1">🔗 Chain Delegation</h2>
-                        <p className="text-xs text-slate-400 mb-3">
-                            Delegate your EOA on target chains to enable cross-chain payments
-                            with preserved <code className="bg-white/10 px-1 py-0.5 rounded text-cyan-400">msg.sender</code>.
-                        </p>
+                    {/* Accordion Sections */}
+                    <div className="mt-2">
+                    <Accordion type="single" collapsible defaultValue="security" className="w-full">
+                        {/* Security Section */}
+                        <AccordionItem value="security">
+                            <AccordionTrigger className="text-sm font-semibold">
+                                <span className="flex items-center gap-2">
+                                    <Link2 className="h-4 w-4 text-primary" />
+                                    Security & Delegation
+                                </span>
+                            </AccordionTrigger>
+                            <AccordionContent>
+                                <p className="text-xs text-muted-foreground mb-3">
+                                    Delegate your EOA on target chains to enable cross-chain payments
+                                    with preserved <code className="bg-secondary px-1 py-0.5 rounded text-primary text-[10px]">msg.sender</code>.
+                                </p>
 
-                        <div className="flex flex-col gap-2">
-                            {SUPPORTED_CHAINS.map(chain => {
-                                const d = delegationStatus[chain.id] || { state: 'unknown' };
-                                const isDelegated = d.state === 'delegated';
-                                const isDelegatedOther = d.state === 'delegated_other';
-                                const canRevoke = isDelegated || isDelegatedOther;
-                                const isPending = pendingChain === chain.id;
+                                <div className="flex flex-col gap-2">
+                                    {SUPPORTED_CHAINS.map(chain => {
+                                        const d = delegationStatus[chain.id] || { state: 'unknown' };
+                                        const isDelegated = d.state === 'delegated';
+                                        const isDelegatedOther = d.state === 'delegated_other';
+                                        const canRevoke = isDelegated || isDelegatedOther;
+                                        const isPending = pendingChain === chain.id;
 
-                                return (
-                                    <div key={chain.id} className="bg-white/5 rounded-lg p-3">
-                                        <div className="flex justify-between items-center">
-                                            <div className="flex items-center gap-2">
-                                                <span className={cn('w-2 h-2 rounded-full', chain.color)} />
-                                                <span className="font-medium text-sm">{chain.name}</span>
+                                        return (
+                                            <div key={chain.id} className="glass-card rounded-xl p-3">
+                                                <div className="flex justify-between items-center">
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="w-2 h-2 rounded-full bg-primary pulse-dot" />
+                                                        <span className="font-medium text-sm">{chain.name}</span>
+                                                    </div>
+                                                    <div className="flex items-center gap-2">
+                                                        {getStatusBadge(chain.id)}
+                                                        {canRevoke ? (
+                                                            <Button
+                                                                variant="outline"
+                                                                size="sm"
+                                                                onClick={() => revokeOnChain(chain.id)}
+                                                                disabled={isPending}
+                                                                className="text-destructive border-destructive/30 hover:bg-destructive/10 text-xs h-7"
+                                                            >
+                                                                {isPending ? '⏳...' : 'Revoke'}
+                                                            </Button>
+                                                        ) : d.state === 'not_delegated' ? (
+                                                            <Button
+                                                                variant="outline"
+                                                                size="sm"
+                                                                onClick={() => delegateOnChain(chain.id)}
+                                                                disabled={isPending}
+                                                                className="text-primary border-primary/30 hover:bg-primary/10 text-xs h-7"
+                                                            >
+                                                                {isPending ? '⏳...' : 'Delegate'}
+                                                            </Button>
+                                                        ) : null}
+                                                    </div>
+                                                </div>
+                                                {isDelegatedOther && d.delegatedTo && (
+                                                    <p className="text-xs text-amber-400/70 mt-1.5 font-mono truncate">
+                                                        → {d.delegatedTo}
+                                                    </p>
+                                                )}
                                             </div>
-                                            <div className="flex items-center gap-2">
-                                                {getStatusBadge(chain.id)}
-                                                {canRevoke ? (
-                                                    <Button
-                                                        variant="outline"
-                                                        size="sm"
-                                                        onClick={() => revokeOnChain(chain.id)}
-                                                        disabled={isPending}
-                                                        className="text-red-400 border-red-400/30 hover:bg-red-400/20 text-xs h-7"
-                                                    >
-                                                        {isPending ? '⏳...' : 'Revoke'}
-                                                    </Button>
-                                                ) : d.state === 'not_delegated' ? (
-                                                    <Button
-                                                        variant="outline"
-                                                        size="sm"
-                                                        onClick={() => delegateOnChain(chain.id)}
-                                                        disabled={isPending}
-                                                        className="text-cyan-400 border-cyan-400/30 hover:bg-cyan-400/20 text-xs h-7"
-                                                    >
-                                                        {isPending ? '⏳...' : 'Delegate'}
-                                                    </Button>
-                                                ) : null}
-                                            </div>
-                                        </div>
-                                        {isDelegatedOther && d.delegatedTo && (
-                                            <p className="text-xs text-amber-400/70 mt-1.5 font-mono truncate">
-                                                → {d.delegatedTo}
-                                            </p>
-                                        )}
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </section>
+                                        );
+                                    })}
+                                </div>
+                            </AccordionContent>
+                        </AccordionItem>
+
+                        {/* Settings Section */}
+                        <AccordionItem value="settings">
+                            <AccordionTrigger className="text-sm font-semibold">
+                                <span className="flex items-center gap-2">
+                                    <SettingsIcon className="h-4 w-4 text-primary" />
+                                    Settings
+                                </span>
+                            </AccordionTrigger>
+                            <AccordionContent>
+                                <p className="text-xs text-muted-foreground italic">
+                                    Coming soon: ENS text.records preferences
+                                </p>
+                            </AccordionContent>
+                        </AccordionItem>
+                    </Accordion>
+                    </div>
                 </>
             )}
         </div>

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { LoaderCircle } from 'lucide-react';
-import { Button, ButtonProps } from "@/components/ui/button";
+import { Button, ButtonProps } from "@magnee/ui/components/button";
 
 interface TxButtonProps {
     onClick: () => Promise<void | any>;

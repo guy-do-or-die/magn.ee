@@ -1,12 +1,12 @@
 import { useState } from 'react'
-import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Button } from '@magnee/ui/components/button'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@magnee/ui/components/card'
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Search, Loader2, ExternalLink, CheckCircle, XCircle, AlertTriangle, ArrowRight } from 'lucide-react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@magnee/ui/components/select'
+import { Search, Loader2, ExternalLink, CheckCircle, XCircle, AlertTriangle, ArrowRight, ArrowUpFromLine, Cable, ArrowDownToLine, Crosshair, ClipboardList, User, KeyRound } from 'lucide-react'
 import { CHAIN_META, getChainMeta } from '@/lib/constants'
 import { analyzeTransaction, type TxAnalysis } from '@/lib/explorer'
 import { shortenAddress } from '@/lib/utils'
@@ -132,7 +132,7 @@ function TxResult({ data }: { data: TxAnalysis }) {
       <Card className="glass-card gradient-border rounded-2xl fade-up">
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
-            <CardTitle className="text-lg">📤 Source Transaction</CardTitle>
+            <CardTitle className="text-lg flex items-center gap-2"><ArrowUpFromLine className="h-5 w-5 text-primary" /> Source Transaction</CardTitle>
             <Badge variant={source.status === 'success' ? 'success' : 'destructive'}>
               {source.status === 'success' ? 'Success' : 'Reverted'}
             </Badge>
@@ -169,7 +169,7 @@ function TxResult({ data }: { data: TxAnalysis }) {
         <Card className="glass-card gradient-border rounded-2xl fade-up fade-up-d1">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-lg">🌉 Bridge Status</CardTitle>
+              <CardTitle className="text-lg flex items-center gap-2"><Cable className="h-5 w-5 text-primary" /> Bridge Status</CardTitle>
               <Badge variant={bridge.status === 'DONE' ? 'success' : bridge.status === 'PENDING' ? 'warning' : 'destructive'}>
                 {bridge.status}
               </Badge>
@@ -200,7 +200,7 @@ function TxResult({ data }: { data: TxAnalysis }) {
         <Card className="glass-card gradient-border rounded-2xl fade-up fade-up-d2">
           <CardHeader className="pb-3">
             <div className="flex items-center justify-between">
-              <CardTitle className="text-lg">📥 Destination Transaction</CardTitle>
+              <CardTitle className="text-lg flex items-center gap-2"><ArrowDownToLine className="h-5 w-5 text-primary" /> Destination Transaction</CardTitle>
               <Badge variant={destination.status === 'success' ? 'success' : 'destructive'}>
                 {destination.status === 'success' ? 'Success' : 'Reverted'}
               </Badge>
@@ -228,7 +228,7 @@ function TxResult({ data }: { data: TxAnalysis }) {
 
             {/* Target Execution */}
             <div>
-              <h4 className="mb-3 text-sm font-semibold">🎯 Target Execution</h4>
+              <h4 className="mb-3 text-sm font-semibold flex items-center gap-1.5"><Crosshair className="h-4 w-4 text-primary" /> Target Execution</h4>
               <div className="space-y-2 text-sm">
                 <div className="flex items-center gap-2">
                   {destination.delegateExecuted
@@ -259,12 +259,12 @@ function TxResult({ data }: { data: TxAnalysis }) {
 
             {/* Events */}
             <div>
-              <h4 className="mb-3 text-sm font-semibold">📋 Events ({destination.events.length})</h4>
+              <h4 className="mb-3 text-sm font-semibold flex items-center gap-1.5"><ClipboardList className="h-4 w-4 text-primary" /> Events ({destination.events.length})</h4>
               <div className="max-h-64 space-y-0.5 overflow-y-auto rounded-xl bg-muted/20 p-2 text-xs">
                 {destination.events.map(ev => (
                   <div key={ev.index} className={`flex items-center gap-2 rounded-lg px-3 py-1.5 ${ev.userInvolved ? 'bg-primary/5 border border-primary/10' : ''}`}>
                     <span className="w-5 text-right text-muted-foreground">{ev.index}</span>
-                    {ev.userInvolved && <span>👤</span>}
+                    {ev.userInvolved && <User className="h-3.5 w-3.5 text-primary" />}
                     <span className="font-mono">{ev.name}</span>
                     <a href={ev.addressUrl} target="_blank" rel="noopener" className="ml-auto text-muted-foreground hover:text-foreground">
                       {shortenAddress(ev.address)}
@@ -280,7 +280,7 @@ function TxResult({ data }: { data: TxAnalysis }) {
       {/* Delegation Status */}
       <Card className="glass-card gradient-border rounded-2xl fade-up fade-up-d3">
         <CardHeader className="pb-3">
-          <CardTitle className="text-lg">🔑 Delegation Status</CardTitle>
+          <CardTitle className="text-lg flex items-center gap-2"><KeyRound className="h-5 w-5 text-primary" /> Delegation Status</CardTitle>
           <CardDescription>EIP-7702 delegation across all chains</CardDescription>
         </CardHeader>
         <CardContent>

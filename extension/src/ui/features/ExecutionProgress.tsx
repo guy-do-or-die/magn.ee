@@ -2,9 +2,9 @@
  * ExecutionProgress Component
  * 
  * Shows real-time step-by-step status during Li.Fi route execution.
+ * Now uses Tailwind + design tokens instead of inline CSS strings.
  */
-
-import React from 'react';
+import { Clock, Loader2, CheckCircle2, XCircle } from 'lucide-react';
 
 export interface ExecutionStatus {
     step: number;
@@ -24,142 +24,45 @@ export function ExecutionProgress({ status }: Props) {
         : 0;
 
     return (
-        <div className="execution-progress">
-            <div className="step-indicator">
-                <span className="step-number">Step {status.step} of {status.total}</span>
-                <span className="step-percent">{progressPercent}%</span>
+        <div className="glass-card rounded-2xl p-4 w-full space-y-3">
+            {/* Step counter */}
+            <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">Step {status.step} of {status.total}</span>
+                <span className="text-primary font-semibold">{progressPercent}%</span>
             </div>
             
-            <div className="progress-bar">
+            {/* Progress bar */}
+            <div className="h-2 bg-secondary rounded-full overflow-hidden">
                 <div 
-                    className="progress-fill"
+                    className="h-full bg-linear-to-r from-primary to-blue-400 rounded-full transition-all duration-300 ease-out"
                     style={{ width: `${progressPercent}%` }} 
                 />
             </div>
 
-            <div className="status-message">
-                {status.status === 'pending' && (
-                    <span className="status-icon pending">⏳</span>
-                )}
-                {status.status === 'in_progress' && (
-                    <span className="status-icon in-progress">🔄</span>
-                )}
-                {status.status === 'done' && (
-                    <span className="status-icon done">✅</span>
-                )}
-                {status.status === 'failed' && (
-                    <span className="status-icon failed">❌</span>
-                )}
-                <span className="message-text">{status.message || 'Waiting...'}</span>
+            {/* Status message */}
+            <div className="flex items-center gap-2 text-sm">
+                {status.status === 'pending' && <Clock className="h-4 w-4 text-muted-foreground" />}
+                {status.status === 'in_progress' && <Loader2 className="h-4 w-4 animate-spin text-primary" />}
+                {status.status === 'done' && <CheckCircle2 className="h-4 w-4 text-emerald-400" />}
+                {status.status === 'failed' && <XCircle className="h-4 w-4 text-destructive" />}
+                <span className="text-foreground">{status.message || 'Waiting...'}</span>
             </div>
 
             {status.substatus && (
-                <div className="substatus">{status.substatus}</div>
+                <div className="text-xs text-muted-foreground pl-6">{status.substatus}</div>
             )}
 
             {status.status === 'done' && (
-                <div className="complete-message">
+                <div className="mt-2 p-2 badge-success rounded-xl border text-sm text-center">
                     Transaction complete! Funds delivered.
                 </div>
             )}
 
             {status.status === 'failed' && (
-                <div className="error-message">
+                <div className="mt-2 p-2 badge-error rounded-xl border text-sm text-center">
                     Transaction failed. Please try again.
                 </div>
             )}
         </div>
     );
 }
-
-// CSS styles (to be added to popup.css or inline)
-export const executionProgressStyles = `
-.execution-progress {
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 12px;
-    padding: 16px;
-    margin: 16px 0;
-}
-
-.step-indicator {
-    display: flex;
-    justify-content: space-between;
-    margin-bottom: 8px;
-    font-size: 14px;
-}
-
-.step-number {
-    color: #a0aec0;
-}
-
-.step-percent {
-    color: #667eea;
-    font-weight: 600;
-}
-
-.progress-bar {
-    height: 8px;
-    background: rgba(255, 255, 255, 0.1);
-    border-radius: 4px;
-    overflow: hidden;
-    margin-bottom: 12px;
-}
-
-.progress-fill {
-    height: 100%;
-    background: linear-gradient(90deg, #667eea, #764ba2);
-    border-radius: 4px;
-    transition: width 0.3s ease;
-}
-
-.status-message {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 14px;
-}
-
-.status-icon {
-    font-size: 16px;
-}
-
-.status-icon.in-progress {
-    animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-}
-
-.message-text {
-    color: #e2e8f0;
-}
-
-.substatus {
-    font-size: 12px;
-    color: #718096;
-    margin-top: 4px;
-    padding-left: 24px;
-}
-
-.complete-message {
-    margin-top: 12px;
-    padding: 8px 12px;
-    background: rgba(72, 187, 120, 0.2);
-    border-radius: 8px;
-    color: #48bb78;
-    font-size: 14px;
-    text-align: center;
-}
-
-.error-message {
-    margin-top: 12px;
-    padding: 8px 12px;
-    background: rgba(245, 101, 101, 0.2);
-    border-radius: 8px;
-    color: #f56565;
-    font-size: 14px;
-    text-align: center;
-}
-`;

@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Button } from '@/components/ui/button';
+import { AlertTriangle } from 'lucide-react';
+import { Button } from '@magnee/ui/components/button';
 import TxButton from '../components/TxButton';
 import { Route } from '@/injected/magneeUtils';
 import { TxDiff } from '../components/TxDiff';
@@ -32,8 +33,8 @@ export function QuoteReview({
             <TxDiff originalTx={tx} selectedRoute={selectedRoute} />
 
             {(!needsApproval && isOverLimit) && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded text-xs text-red-700">
-                    <strong>⚠️ Pilot Safety Limit</strong>
+                <div className="p-3 badge-error border rounded-xl text-xs">
+                    <strong className="flex items-center gap-1"><AlertTriangle className="h-3.5 w-3.5" /> Pilot Safety Limit</strong>
                     <p className="mt-1">
                         Amount (${parseFloat(selectedRoute.amountUSD!).toFixed(2)}) exceeds the recommended $5.00 pilot limit.
                     </p>
@@ -41,7 +42,7 @@ export function QuoteReview({
                         <input
                             type="checkbox"
                             id="safety-override"
-                            className="rounded border-red-300 text-red-600 focus:ring-red-500"
+                            className="rounded border-destructive/50 text-destructive focus:ring-destructive"
                             checked={safetyOverride}
                             onChange={(e) => setSafetyOverride(e.target.checked)}
                         />
@@ -63,7 +64,7 @@ export function QuoteReview({
                 ) : (
                     <TxButton
                         id="confirm-btn"
-                        className="bg-purple-600 hover:bg-purple-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="bg-primary hover:bg-primary/90 text-primary-foreground disabled:opacity-50 disabled:cursor-not-allowed"
                         onClick={async () => onConfirm()}
                         text="Confirm Magneefy"
                         loadingText="Confirming..."

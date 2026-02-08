@@ -87,7 +87,7 @@ export function Chains() {
                   className="text-[10px]"
                 >
                   {status === 'loading' && 'Checking…'}
-                  {status === 'delegated' && '✓ Delegate Active'}
+                  {status === 'delegated' && 'Delegate Active'}
                   {status === 'none' && 'Not Delegated'}
                   {status === 'other' && 'Other Delegate'}
                   {status === 'error' && 'RPC Error'}

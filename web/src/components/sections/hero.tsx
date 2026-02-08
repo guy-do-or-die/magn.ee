@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { Button } from '@/components/ui/button'
+import { Button } from '@magnee/ui/components/button'
 import { ArrowRight, Download, Sparkles } from 'lucide-react'
 
 export function Hero() {

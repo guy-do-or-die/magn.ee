@@ -19,6 +19,18 @@ interface PendingRequest {
 // Store pending requests: reqId -> { callback, payload }
 const pendingRequests = new Map<string, PendingRequest>();
 
+// Keyboard shortcut handler - Ctrl+Shift+I to toggle interception
+chrome.commands.onCommand.addListener((command) => {
+    if (command === 'toggle-interception') {
+        chrome.storage.local.get(['interceptionEnabled'], (result) => {
+            const currentState = result.interceptionEnabled !== false; // default true
+            const newState = !currentState;
+            chrome.storage.local.set({ interceptionEnabled: newState });
+            console.log('[Magnee BG] Interception toggled:', newState ? 'ON' : 'OFF');
+        });
+    }
+});
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'MAGNEE_TX') {
         const { to, value, data, from, chainId } = message.payload;

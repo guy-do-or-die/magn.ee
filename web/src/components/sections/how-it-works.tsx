@@ -1,4 +1,4 @@
-import { Zap, Route, Shield, ArrowRight } from 'lucide-react'
+import { Zap, Route, Shield, ArrowRight, Check } from 'lucide-react'
 
 const STEPS = [
   {
@@ -70,7 +70,7 @@ export function HowItWorks() {
               )}
               {i === 2 && (
                 <div className="mt-6 hidden items-center gap-2 text-xs text-emerald-400/60 sm:flex">
-                  <span>✓ done</span>
+                  <span className="flex items-center gap-1"><Check className="h-3 w-3" /> done</span>
                 </div>
               )}
             </div>
