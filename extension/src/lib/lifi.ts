@@ -147,6 +147,8 @@ export interface LiFiQuoteRequest {
         toContractGasLimit: string;
     }[];
     integrator?: string;
+    slippage?: number; // 0-1 range (e.g. 0.005 = 0.5%), default 0.03
+    gasLimitMultiplier?: number; // e.g. 1.2 = 120%
 }
 
 /**
@@ -199,7 +201,7 @@ export async function fetchLiFiQuote(params: LiFiQuoteRequest): Promise<LiFiQuot
         toAmount: params.toAmount,
         contractCalls: params.contractCalls,
         integrator: params.integrator || 'Magnee',
-        slippage: 0.03,  // 3% slippage tolerance for swap steps
+        slippage: params.slippage ?? 0.03,  // User setting or 3% default
     } as ContractCallsQuoteRequest;
 
     // SDK functions use global config - no client arg needed

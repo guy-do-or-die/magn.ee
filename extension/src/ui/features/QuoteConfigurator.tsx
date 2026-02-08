@@ -4,6 +4,7 @@ import { Search, Loader2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { getTokensWithBalances, type TokenWithBalance } from '@/lib/tokenBalances';
 import { SUPPORTED_CHAINS } from '@/lib/constants';
+import { loadSettings, type UserSettings } from '@/lib/settings';
 
 interface QuoteConfiguratorProps {
     walletAddress: string | null;
@@ -27,6 +28,7 @@ export function QuoteConfigurator({
     const [tokens, setTokens] = useState<TokenWithBalance[]>([]);
     const [loading, setLoading] = useState(false);
     const [availableChains, setAvailableChains] = useState<number[]>([]);
+    const [preferredTokens, setPreferredTokens] = useState<Record<number, string>>({});
 
     // Fetch tokens with balances when wallet address or chain changes
     useEffect(() => {
@@ -39,6 +41,10 @@ export function QuoteConfigurator({
         const fetchTokens = async () => {
             setLoading(true);
             try {
+                // Load user settings for preferred tokens
+                const settings = await loadSettings();
+                setPreferredTokens(settings.preferredTokens || {});
+
                 // Get all supported chain IDs
                 const chainIds = SUPPORTED_CHAINS.map(c => c.id);
                 
@@ -55,9 +61,13 @@ export function QuoteConfigurator({
                     setSourceChainId(chainsWithTokens[0]);
                 }
 
-                // Auto-select first token on chain if current selection invalid
+                // Auto-select preferred token on chain, or first available
                 const tokensOnChain = tokensWithBalances.filter(t => t.chainId === sourceChainId);
-                if (tokensOnChain.length > 0 && !tokensOnChain.some(t => t.address === sourceTokenAddress)) {
+                const preferred = settings.preferredTokens?.[sourceChainId];
+                const preferredMatch = preferred && tokensOnChain.find(t => t.address.toLowerCase() === preferred.toLowerCase());
+                if (preferredMatch) {
+                    setSourceTokenAddress(preferredMatch.address);
+                } else if (tokensOnChain.length > 0 && !tokensOnChain.some(t => t.address === sourceTokenAddress)) {
                     setSourceTokenAddress(tokensOnChain[0].address);
                 }
             } catch (error) {
@@ -107,9 +117,13 @@ export function QuoteConfigurator({
                                     const newChainId = Number(val);
                                     setSourceChainId(newChainId);
                                     
-                                    // Auto-select first token on new chain
+                                    // Auto-select preferred token on new chain, or first available
                                     const tokensOnChain = tokens.filter(t => t.chainId === newChainId);
-                                    if (tokensOnChain.length > 0) {
+                                    const preferred = preferredTokens[newChainId];
+                                    const preferredMatch = preferred && tokensOnChain.find(t => t.address.toLowerCase() === preferred.toLowerCase());
+                                    if (preferredMatch) {
+                                        setSourceTokenAddress(preferredMatch.address);
+                                    } else if (tokensOnChain.length > 0) {
                                         setSourceTokenAddress(tokensOnChain[0].address);
                                     }
                                 }}

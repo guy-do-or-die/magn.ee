@@ -3,6 +3,7 @@ import { fetchLiFiQuote } from '@/lib/lifi';
 import { Route, encodeExecuteSingle, encodeExecuteWithSignature } from '@/injected/magneeUtils';
 import { ZERO_ADDRESS } from '@/lib/constants';
 import { signExecuteTypedData } from '@/lib/walletBridge';
+import { loadSettings } from '@/lib/settings';
 
 interface UseQuoteFetcherParams {
     sourceChainId: number;
@@ -22,6 +23,11 @@ export function useQuoteFetcher({ sourceChainId, sourceTokenAddress, tx }: UseQu
         setRoutes([]);
 
         try {
+            // Load user settings for slippage / gas limit
+            const userSettings = await loadSettings();
+            const slippage = userSettings.slippage / 10000; // bps -> 0-1 range
+            const gasLimitMultiplier = userSettings.gasLimit;
+
             const currentChain = sourceChainId;
             const targetChain = tx.chainId;
             const generatedRoutes: Route[] = [];
@@ -70,12 +76,17 @@ export function useQuoteFetcher({ sourceChainId, sourceTokenAddress, tx }: UseQu
                 );
             }
 
+            const baseGasLimit = 600000;
+            const effectiveGasLimit = gasLimitMultiplier
+                ? Math.round(baseGasLimit * gasLimitMultiplier).toString()
+                : baseGasLimit.toString();
+
             const contractCall = {
                 fromAmount: amountDecimal,
                 fromTokenAddress: ZERO_ADDRESS,
                 toContractAddress: tx.from,  // User's EOA (pre-delegated)
                 toContractCallData: contractCallData,
-                toContractGasLimit: '600000'  // Slightly higher for sig verification
+                toContractGasLimit: effectiveGasLimit,
             };
 
             const quote = await fetchLiFiQuote({
@@ -86,7 +97,9 @@ export function useQuoteFetcher({ sourceChainId, sourceTokenAddress, tx }: UseQu
                 toToken: ZERO_ADDRESS,
                 toAmount: amountDecimal,
                 integrator: 'Magnee',
-                contractCalls: [contractCall]
+                contractCalls: [contractCall],
+                slippage,
+                gasLimitMultiplier,
             });
 
             // Build approval tx if needed (for ERC20 tokens when approval address is present)
