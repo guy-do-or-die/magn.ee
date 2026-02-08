@@ -136,7 +136,7 @@ async function executeBatchedTx(
                         }
                         
                         // Still pending
-                        broadcastStatus(`Waiting for confirmation (${attempts + 1}/${maxAttempts})`, 'in_progress', reqId);
+                        broadcastStatus(`Waiting for confirmation`, 'in_progress', reqId);
                         await new Promise(resolve => setTimeout(resolve, 1500));
                         attempts++;
                     } catch (statusErr: any) {
@@ -227,7 +227,7 @@ async function handleMagneefy(
 
     // Switch to target chain if needed
     if (route?.chainId) {
-        if (reqId) broadcastStatus(`Ensuring chain ${route.chainId}...`, 'in_progress', reqId);
+        if (reqId) broadcastStatus(`Ensuring chain...`, 'in_progress', reqId);
         await ensureChain(requestFn, route.chainId);
     }
 

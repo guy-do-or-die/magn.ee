@@ -58,6 +58,10 @@ export function addressUrl(chain: Chain, addr: string): string {
   return `${explorerUrl(chain)}/address/${addr}`
 }
 
+// ── Known Event Signatures ──
+// keccak256("Executed(address,uint256,bool)") — emitted by MagneeDelegateAccount
+export const EXECUTED_EVENT_TOPIC = '0x8d164b427e1fdbcdd4488310c98a30b974353972048528fdd1c459fe0961b2c7'
+
 // ── Bridge Event Names (infra noise for filtering) ──
 
 export const BRIDGE_EVENT_NAMES = new Set([
