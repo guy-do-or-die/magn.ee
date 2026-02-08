@@ -27,16 +27,10 @@ export const DELEGATE_ADDRESSES: Record<number, `0x${string}`> = {
     [arbitrum.id]: '0x21422c9F4E27Dff05158dA4242637dF483d77422'
 }
 
-// Explorer URLs
-const EXPLORER_URLS: Record<number, string> = {
-    [base.id]: 'https://basescan.org',
-    [optimism.id]: 'https://optimistic.etherscan.io',
-    [arbitrum.id]: 'https://arbiscan.io',
-}
-
 export function explorerAddress(chainId: number, address: string): string {
-    const base = EXPLORER_URLS[chainId] || 'https://etherscan.io'
-    return `${base}/address/${address}`
+    const chain = [base, optimism, arbitrum].find(c => c.id === chainId)
+    const url = chain?.blockExplorers?.default?.url || 'https://etherscan.io'
+    return `${url}/address/${address}`
 }
 
 // ABIs

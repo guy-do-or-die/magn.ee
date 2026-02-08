@@ -1,4 +1,4 @@
-import { zeroAddress } from 'viem';
+import { zeroAddress, type Chain as ViemChain } from 'viem';
 import { mainnet, optimism, base, arbitrum } from 'viem/chains';
 
 export const ZERO_ADDRESS = zeroAddress;
@@ -85,3 +85,27 @@ export const POPULAR_TOKENS: Token[] = [
         name: 'USD Coin'
     }
 ];
+
+// Explorer helpers — derived from viem chain definitions (no hardcoding!)
+const CHAINS_BY_ID: Record<number, ViemChain> = {
+    [mainnet.id]: mainnet,
+    [optimism.id]: optimism,
+    [base.id]: base,
+    [arbitrum.id]: arbitrum,
+};
+
+export function getExplorerTxUrl(chainId: number, txHash: string): string | null {
+    const chain = CHAINS_BY_ID[chainId];
+    const url = chain?.blockExplorers?.default?.url;
+    return url ? `${url}/tx/${txHash}` : null;
+}
+
+export function getExplorerAddressUrl(chainId: number, address: string): string | null {
+    const chain = CHAINS_BY_ID[chainId];
+    const url = chain?.blockExplorers?.default?.url;
+    return url ? `${url}/address/${address}` : null;
+}
+
+export function getExplorerName(chainId: number): string {
+    return CHAINS_BY_ID[chainId]?.blockExplorers?.default?.name || `Chain ${chainId}`;
+}

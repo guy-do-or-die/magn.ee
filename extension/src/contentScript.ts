@@ -27,6 +27,7 @@
 
             chrome.runtime.sendMessage({
                 type: 'MAGNEE_TX',
+                id: event.data.id, // Forward injected script's reqId for status tracking
                 payload: event.data.payload
             }, (response) => {
                 // Check for runtime errors (like context invalidation during request)
@@ -42,6 +43,22 @@
                     id: event.data.id,
                     payload: response
                 }, '*');
+            });
+        }
+
+        if (event.data?.type === 'MAGNEE_STATUS_UPDATE') {
+            // Forward status updates to Background/Popup
+            chrome.runtime.sendMessage({
+                type: 'MAGNEE_TX_STATUS',
+                payload: event.data.payload
+            });
+        }
+        
+        if (event.data?.type === 'MAGNEEFY_COMPLETED') {
+            console.log('[Magnee Content] Forwarding completion:', event.data.payload);
+            chrome.runtime.sendMessage({
+                type: 'MAGNEEFY_COMPLETED',
+                payload: event.data.payload
             });
         }
     });

@@ -35,7 +35,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'MAGNEE_TX') {
         const { to, value, data, from, chainId } = message.payload;
 
-        const reqId = Date.now().toString(); // Internal ID for background<->popup
+        // Use ID from content script if available to match status updates
+        const reqId = message.id || Date.now().toString();
 
         // Store secure payload and callback in memory
         pendingRequests.set(reqId, {
@@ -49,8 +50,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         chrome.windows.create({
             url: `src/ui/intercept.html?id=${reqId}`,
             type: 'popup',
-            width: 420,
-            height: 650,
+            width: 500,
+            height: 1000,
             focused: true
         });
 

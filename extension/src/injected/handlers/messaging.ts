@@ -7,6 +7,7 @@ import type { Route } from '../magneeUtils';
 
 export interface MagneeResponse {
     action: 'MAGNEEFY' | 'REJECT' | 'FORWARD';
+    id?: string;
     route?: Route;
     error?: string;
 }
@@ -50,7 +51,7 @@ export function waitForResponse(reqId: string): Promise<MagneeResponse> {
             }
 
             const { action, route } = event.data.payload || {};
-            resolve({ action, route });
+            resolve({ action, route, id: reqId });
         };
 
         window.addEventListener('message', handleMessage);

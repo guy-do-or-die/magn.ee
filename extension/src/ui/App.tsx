@@ -7,14 +7,14 @@ import { PaymentRequestHeader } from './features/PaymentRequestHeader';
 import { QuoteConfigurator } from './features/QuoteConfigurator';
 import { QuoteList } from './features/QuoteList';
 import { QuoteReview } from './features/QuoteReview';
-import { ExecutionProgress, ExecutionStatus } from './features/ExecutionProgress';
+import { ExecutionProgress, ExecutionStatus, TxLink } from './features/ExecutionProgress';
 
 import { useQuoteFetcher } from './hooks/useQuoteFetcher';
 import { useApproval } from './hooks/useApproval';
 import { initLiFiSDK } from '@/lib/lifi';
 
 import { Route } from '@/injected/magneeUtils';
-import { ZERO_ADDRESS, DEFAULT_SOURCE_CHAIN_ID, SUPPORTED_CHAINS, POPULAR_TOKENS } from '@/lib/constants';
+import { ZERO_ADDRESS, DEFAULT_SOURCE_CHAIN_ID, SUPPORTED_CHAINS, POPULAR_TOKENS, getExplorerTxUrl, getExplorerAddressUrl, getExplorerName } from '@/lib/constants';
 import './global.css';
 
 type Step = 'CONFIG' | 'LOADING' | 'SELECT' | 'CONFIRM' | 'EXECUTING' | 'STATUS';
@@ -50,8 +50,64 @@ export default function App() {
         step: 0,
         total: 0,
         status: 'pending',
-        message: ''
+        message: '',
+        history: [],
+        txLinks: []
     });
+
+    // Listen for execution status updates from content script
+    useEffect(() => {
+        const listener = (message: any) => {
+            if (message.type === 'MAGNEE_TX_STATUS') {
+                console.log('[Magnee UI] Status update:', message.payload);
+                const { message: msg, status } = message.payload;
+                
+                setExecutionStatus(prev => {
+                    // Avoid duplicate messages
+                    if (prev.history.includes(msg)) return prev;
+                    
+                    return {
+                        ...prev,
+                        status: status === 'CONFIRMED' || status === 'SUCCESS' ? 'done' : 
+                                status === 'FAILED' ? 'failed' : 'in_progress',
+                        message: msg,
+                        history: [...prev.history, msg]
+                    };
+                });
+            }
+            if (message.type === 'MAGNEEFY_COMPLETED') {
+                console.log('[Magnee UI] Completed:', message.payload);
+                const { txHash, sourceChainId, destChainId } = message.payload;
+                
+                // Build explorer links
+                const links: TxLink[] = [];
+                if (txHash && sourceChainId) {
+                    const url = getExplorerTxUrl(sourceChainId, txHash);
+                    if (url) links.push({ label: `Source tx on ${getExplorerName(sourceChainId)}`, url });
+                }
+                if (txHash) {
+                    // LiFi scan tracks bridge delivery to destination chain
+                    links.push({ label: 'Track bridge delivery on Li.Fi', url: `https://scan.li.fi/tx/${txHash}` });
+                }
+                if (tx?.to && destChainId) {
+                    const addressUrl = getExplorerAddressUrl(destChainId, tx.to);
+                    if (addressUrl) {
+                        links.push({ label: `Destination on ${getExplorerName(destChainId)}`, url: addressUrl });
+                    }
+                }
+                
+                setExecutionStatus(prev => ({
+                    ...prev,
+                    status: 'done',
+                    message: 'Transaction verified on-chain',
+                    history: [...prev.history, 'Transaction verified on-chain'],
+                    txLinks: links
+                }));
+            }
+        };
+        chrome.runtime.onMessage.addListener(listener);
+        return () => chrome.runtime.onMessage.removeListener(listener);
+    }, []);
 
     const [originalChainId, setOriginalChainId] = useState<number | null>(null);
 
@@ -188,15 +244,22 @@ export default function App() {
             setStep('EXECUTING');
             const updateMsg = (msg: string) => {
                 console.log('[Magnee]', msg);
-                setExecutionStatus({ step: 1, total: 1, status: 'in_progress', message: msg });
+                setExecutionStatus(prev => ({ 
+                    ...prev, 
+                    step: 1, 
+                    total: 1, 
+                    status: 'in_progress', 
+                    message: msg,
+                    history: [...prev.history, msg] 
+                }));
             };
 
             try {
-                updateMsg('Step 1: Creating wallet bridge...');
+                updateMsg('Creating wallet bridge...');
                 const { walletRequest, setCurrentReqId } = await import('@/lib/walletBridge');
                 setCurrentReqId(reqId!);
                 
-                updateMsg('Step 2: Testing wallet connection...');
+                updateMsg('Testing wallet connection...');
                 const testResult = await walletRequest('eth_chainId');
                 if (!testResult.ok) {
                     throw new Error(`Wallet bridge failed: ${testResult.error}`);

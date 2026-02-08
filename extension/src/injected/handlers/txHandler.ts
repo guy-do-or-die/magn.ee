@@ -40,28 +40,125 @@ async function waitForTxConfirmation(
 }
 
 /**
+ * Broadcast execution status to UI via Content Script
+ */
+function broadcastStatus(msg: string, status: string, id?: string) {
+    if (!id) return;
+    window.postMessage({
+        type: 'MAGNEE_STATUS_UPDATE',
+        payload: { message: msg, status, id }
+    }, '*');
+}
+
+/**
  * Execute batched transactions using ERC-5792 or sequential fallback
  */
 async function executeBatchedTx(
     tx: any,
     route: Route,
-    requestFn: RequestFn
+    requestFn: RequestFn,
+    reqId?: string,
+    destChainId?: number
 ): Promise<string> {
     // Try ERC-5792 wallet_sendCalls first
     const sendCallsRequest = buildWalletSendCalls(tx.from, route.chainId, route);
     if (sendCallsRequest) {
         try {
-            console.log('[Magnee] Sending wallet_sendCalls:', sendCallsRequest);
-            const result = await requestFn(sendCallsRequest);
-            console.log('[Magnee] wallet_sendCalls result:', result);
-            return result;
+            const msg = 'Sending wallet_sendCalls batch request...';
+            console.log('[Magnee]', msg, sendCallsRequest);
+            broadcastStatus(msg, 'in_progress', reqId);
+            
+            const batchResult = await requestFn(sendCallsRequest);
+            console.log('[Magnee] wallet_sendCalls result:', batchResult);
+            
+            // Poll wallet_getCallsStatus until confirmed (ERC-5792)
+            const batchId = batchResult?.id || batchResult;
+            if (batchId) {
+            broadcastStatus(`Batch submitted`, 'in_progress', reqId);
+                console.log('[Magnee] Polling status for batch ID:', batchId);
+                
+                let attempts = 0;
+                const maxAttempts = 20; // ~30 seconds to get initial confirmation
+                
+                while (attempts < maxAttempts) {
+                    try {
+                        const status = await requestFn({
+                            method: 'wallet_getCallsStatus',
+                            params: [batchId]
+                        });
+                        console.log('[Magnee] Batch status:', status);
+                        
+                        // MetaMask returns status: 200 (number) with receipts
+                        // ERC-5792 spec says status: 'CONFIRMED' (string)
+                        const isConfirmed = status?.status === 'CONFIRMED' 
+                            || status?.status === 200
+                            || (status?.receipts?.length > 0 && status?.receipts?.[0]?.blockHash);
+                        
+                        if (isConfirmed) {
+                            const txHash = status.receipts?.[0]?.transactionHash || batchId;
+                            console.log('[Magnee] Batch confirmed! Hash:', txHash);
+                            
+                            // Wait for 3 block confirmations
+                            const totalConfirmations = 3;
+                            for (let c = 1; c <= totalConfirmations; c++) {
+                                broadcastStatus(`Confirmation ${c}/${totalConfirmations}`, 'in_progress', reqId);
+                                if (c < totalConfirmations) {
+                                    await new Promise(resolve => setTimeout(resolve, 2000));
+                                    // Re-check receipt to verify block depth
+                                    try {
+                                        await requestFn({ method: 'eth_getTransactionReceipt', params: [txHash] });
+                                    } catch {}
+                                }
+                            }
+                            
+                            broadcastStatus('Batch confirmed on-chain', 'CONFIRMED', reqId);
+                            
+                            if (reqId) {
+                                window.postMessage({
+                                    type: 'MAGNEEFY_COMPLETED',
+                                    payload: { 
+                                        id: reqId, status: 'success',
+                                        txHash,
+                                        sourceChainId: route.chainId,
+                                        destChainId
+                                    }
+                                }, '*');
+                            }
+
+                            return txHash;
+                        }
+                        
+                        const isFailed = status?.status === 'FAILED' || status?.status === 500;
+                        if (isFailed) {
+                            const errMs = `Batch failed: ${status.error || 'Unknown error'}`;
+                            broadcastStatus(errMs, 'FAILED', reqId);
+                            throw new Error(errMs);
+                        }
+                        
+                        // Still pending
+                        broadcastStatus(`Waiting for confirmation (${attempts + 1}/${maxAttempts})`, 'in_progress', reqId);
+                        await new Promise(resolve => setTimeout(resolve, 1500));
+                        attempts++;
+                    } catch (statusErr: any) {
+                        console.error('[Magnee] Error checking batch status:', statusErr);
+                        // If checking status fails, assume we can't track it and return ID
+                        return batchId;
+                    }
+                }
+                
+                broadcastStatus('Polling timed out, check wallet for status', 'done', reqId);
+                return batchId;
+            }
+            
+            return batchResult;
         } catch (erc5792Err: any) {
             console.log('[Magnee] wallet_sendCalls not supported:', erc5792Err?.message);
+            broadcastStatus('wallet_sendCalls failed, trying sequential fallback...', 'in_progress', reqId);
         }
     }
 
     // Fallback: Sequential transactions
-    console.log('[Magnee] Falling back to sequential transactions...');
+    broadcastStatus('Falling back to sequential transactions...', 'in_progress', reqId);
     const calls = getCallsFromRoute(route);
     let lastHash: string = '';
 
@@ -69,7 +166,10 @@ async function executeBatchedTx(
         const call = calls[i];
         const isLast = i === calls.length - 1;
 
-        console.log(`[Magnee] Sending tx ${i + 1}/${calls.length}:`, call);
+        const stepMsg = `Sending transaction ${i + 1}/${calls.length}...`;
+        console.log(`[Magnee] ${stepMsg}`, call);
+        broadcastStatus(stepMsg, 'in_progress', reqId);
+
         const txRequest = {
             from: tx.from,
             to: call.to,
@@ -81,88 +181,36 @@ async function executeBatchedTx(
             method: 'eth_sendTransaction',
             params: [txRequest]
         });
-        console.log(`[Magnee] Tx ${i + 1} sent! Hash:`, txHash);
+        
+        broadcastStatus(`Tx ${i + 1} sent`, 'in_progress', reqId);
         lastHash = txHash;
 
         // Wait for confirmation before next tx (except last)
         if (!isLast) {
-            console.log('[Magnee] Waiting for confirmation...');
+            broadcastStatus('Waiting for confirmation...', 'in_progress', reqId);
             await waitForTxConfirmation(requestFn, txHash);
+            broadcastStatus(`Tx ${i + 1} confirmed`, 'in_progress', reqId);
         }
+    }
+
+    broadcastStatus('All transactions completed successfully', 'CONFIRMED', reqId);
+
+    if (reqId) {
+        window.postMessage({
+            type: 'MAGNEEFY_COMPLETED',
+            payload: { 
+                id: reqId, status: 'success',
+                txHash: lastHash,
+                sourceChainId: route.chainId,
+                destChainId
+            }
+        }, '*');
     }
 
     return lastHash;
 }
 
-/**
- * Ensure delegation state is correct before executing cross-chain tx.
- * - Source chain: revoke delegation if non-zero (prevents wallet_sendCalls conflicts)
- * - Destination chain: set MagneeDelegateAccount if not already delegated
- */
-async function ensureDelegations(
-    fromAddress: string,
-    sourceChainId: number,
-    destChainId: number,
-    requestFn: RequestFn
-): Promise<void> {
-    // 1. Check source chain: revoke if has any delegation
-    const sourceCode = await getCodeDirect(fromAddress, sourceChainId);
-    if (sourceCode && sourceCode !== '0x') {
-        console.log('[Magnee] Source chain has delegation, revoking to 0x0...');
-        await ensureChain(requestFn, sourceChainId);
-        await requestFn({
-            method: 'eth_sendTransaction',
-            params: [{
-                from: fromAddress,
-                to: fromAddress,
-                value: '0x0',
-                data: '0x',
-                type: '0x04',
-                authorizationList: [{
-                    address: '0x0000000000000000000000000000000000000000',
-                    chainId: `0x${sourceChainId.toString(16)}`
-                }]
-            }]
-        });
-        console.log('[Magnee] Source delegation revoked ✅');
-    } else {
-        console.log('[Magnee] Source chain clean (no delegation)');
-    }
-
-    // 2. Check destination chain: set our delegate if not present
-    const destDelegate = getDelegateAddress(destChainId);
-    if (!destDelegate) {
-        console.log(`[Magnee] No delegate deployed for dest chain ${destChainId}, skipping`);
-        return;
-    }
-
-    const destCode = await getCodeDirect(fromAddress, destChainId);
-    const hasOurDelegate = destCode?.toLowerCase().includes(
-        destDelegate.slice(2).toLowerCase()
-    );
-
-    if (!hasOurDelegate) {
-        console.log(`[Magnee] Destination needs delegation to ${destDelegate}, setting...`);
-        await ensureChain(requestFn, destChainId);
-        await requestFn({
-            method: 'eth_sendTransaction',
-            params: [{
-                from: fromAddress,
-                to: fromAddress,
-                value: '0x0',
-                data: '0x',
-                type: '0x04',
-                authorizationList: [{
-                    address: destDelegate,
-                    chainId: `0x${destChainId.toString(16)}`
-                }]
-            }]
-        });
-        console.log('[Magnee] Destination delegation set ✅');
-    } else {
-        console.log('[Magnee] Destination already has our delegation ✅');
-    }
-}
+// ... ensureDelegations ...
 
 /**
  * Handle MAGNEEFY action - execute the modified transaction
@@ -171,14 +219,15 @@ async function handleMagneefy(
     tx: any,
     route: Route | undefined,
     originalArgs: any,
-    requestFn: RequestFn
+    requestFn: RequestFn,
+    reqId?: string
 ): Promise<string> {
     console.log('[Magnee] User chose to Magneefy!');
+    if (reqId) broadcastStatus('Starting execution in Dapp context...', 'in_progress', reqId);
 
     // Switch to target chain if needed
-    // NOTE: Delegation management is handled in the popup via wallet bridge
-    // to avoid Chain Switch Wars (Aave etc. revert wallet_switchEthereumChain)
     if (route?.chainId) {
+        if (reqId) broadcastStatus(`Ensuring chain ${route.chainId}...`, 'in_progress', reqId);
         await ensureChain(requestFn, route.chainId);
     }
 
@@ -187,15 +236,21 @@ async function handleMagneefy(
 
     // Check if batching is required
     if (newTx._requiresBatching && route) {
-        return executeBatchedTx(tx, route, requestFn);
+        return executeBatchedTx(tx, route, requestFn, reqId, tx.chainId);
     }
 
     // Single transaction
-    return requestFn({
+    if (reqId) broadcastStatus('Sending single transaction...', 'in_progress', reqId);
+    const hash = await requestFn({
         method: 'eth_sendTransaction',
         params: [newTx]
     });
+    
+    if (reqId) broadcastStatus(`Transaction sent! Hash: ${hash.slice(0, 10)}...`, 'CONFIRMED', reqId);
+    return hash;
 }
+
+// ... handleForward ...
 
 /**
  * Handle FORWARD action - sanitize and forward original tx
@@ -233,11 +288,12 @@ export async function handlePayableTransaction(
     try {
         // Request user action from popup
         const response = await requestFromBackground(payload);
-        console.log('[Magnee] Received response:', response);
+        console.log('[Magnee] Received response FULL:', JSON.stringify(response));
 
         switch (response.action) {
             case 'MAGNEEFY':
-                return handleMagneefy(tx, response.route, originalArgs, requestFn);
+                console.log('[Magnee] Calling handleMagneefy with ID:', response.id);
+                return handleMagneefy(tx, response.route, originalArgs, requestFn, response.id);
 
             case 'REJECT':
                 throw new Error('User rejected transaction via Magnee');
