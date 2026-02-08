@@ -201,7 +201,7 @@ export async function fetchLiFiQuote(params: LiFiQuoteRequest): Promise<LiFiQuot
         toAmount: params.toAmount,
         contractCalls: params.contractCalls,
         integrator: params.integrator || 'Magnee',
-        slippage: params.slippage ?? 0.03,  // User setting or 3% default
+        slippage: 0.03, // params.slippage ?? 0.03,  // User setting or 3% default
     } as ContractCallsQuoteRequest;
 
     // SDK functions use global config - no client arg needed

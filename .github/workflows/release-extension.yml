@@ -20,7 +20,7 @@ jobs:
         run: bun install
 
       - name: Build extension
-        run: bun run build:ext
+        run: cd extension && bunx tsc && bunx vite build
 
       - name: Package extension
         run: |
