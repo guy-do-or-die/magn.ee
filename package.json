@@ -16,6 +16,7 @@
         "build": "bun run build:ext && bun run build:demo",
         "build:ext": "cd extension && bun run build",
         "build:demo": "cd demo && bun run build",
+        "build:zip": "bun run build:ext && cd extension/dist && zip -r ../../magnee-extension.zip .",
         "delegate:deploy": "cd extension && bun --env-file=../.env scripts/deploy-delegate.ts",
         "delegate:update": "cd extension && bun scripts/update-delegate-address.ts",
         "verify:chain": "source .env && cd contracts && forge verify-contract --rpc-url",

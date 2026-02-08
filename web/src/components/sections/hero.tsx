@@ -53,7 +53,7 @@ export function Hero() {
         {/* CTAs */}
         <div className="fade-up fade-up-d3 mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
           <Button size="lg" asChild className="glow-btn gap-2 rounded-full px-8">
-            <a href="#download">
+            <a href="https://github.com/guy-do-or-die/magn.ee/releases/latest/download/magnee-extension.zip">
               <Download className="h-4 w-4" />
               Get Extension
             </a>
