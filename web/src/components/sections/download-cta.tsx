@@ -21,15 +21,15 @@ export function DownloadCTA() {
                 </p>
                 <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
                   <Button size="lg" className="glow-btn gap-2 rounded-full px-8" asChild>
-                    <a href="#download">
+                    <a href="https://github.com/guy-do-or-die/magn.ee/releases/latest" target="_blank" rel="noopener">
                       <Chrome className="h-4 w-4" />
-                      Chrome Web Store
+                      Latest Release
                     </a>
                   </Button>
                   <Button variant="outline" size="lg" className="gap-2 rounded-full px-8" asChild>
-                    <a href="#download">
+                    <a href="https://github.com/guy-do-or-die/magn.ee/releases/latest/download/magnee-extension.zip">
                       <Download className="h-4 w-4" />
-                      Manual Install
+                      Download .zip
                     </a>
                   </Button>
                 </div>
