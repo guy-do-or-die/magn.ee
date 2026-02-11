@@ -380,6 +380,10 @@ export default function App() {
             type: 'MAGNEE_DECISION',
             payload: { id: reqId, action, route: chosenRoute }
         });
+        if (action === 'CONTINUE') {
+            window.close();
+            return;
+        }
         setStep('STATUS');
     };
 

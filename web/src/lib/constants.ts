@@ -23,7 +23,7 @@ export const CHAIN_META: ChainMeta[] = [
 export function resolveChain(nameOrId: string): Chain | undefined {
   const lower = nameOrId.toLowerCase()
   const meta = CHAIN_META.find(
-    m => m.aliases.includes(lower) || m.chain.id.toString() === nameOrId || m.chain.name.toLowerCase() === lower
+    m => m.key === lower || m.aliases.includes(lower) || m.chain.id.toString() === nameOrId || m.chain.name.toLowerCase() === lower
   )
   return meta?.chain
 }

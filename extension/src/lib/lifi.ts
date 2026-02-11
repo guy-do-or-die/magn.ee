@@ -7,7 +7,6 @@
 
 import {
     createConfig,
-    getContractCallsQuote,
     executeRoute,
     convertQuoteToRoute,
     getStatus,
@@ -16,7 +15,6 @@ import {
 import type { 
     LiFiStep, 
     RouteExtended,
-    ContractCallsQuoteRequest,
 } from '@lifi/sdk';
 import { createWalletClient, custom } from 'viem';
 import { arbitrum, optimism, base, mainnet } from 'viem/chains';
@@ -186,13 +184,14 @@ export interface LiFiQuoteResponse {
 }
 
 /**
- * Fetch a quote using the SDK (global config pattern - no client arg)
+ * Fetch a quote using direct POST to Li.Fi API
+ * (SDK's getContractCallsQuote uses GET which fails for ERC-20 toToken)
  */
 export async function fetchLiFiQuote(params: LiFiQuoteRequest): Promise<LiFiQuoteResponse> {
     console.log('[Magnee] Li.Fi SDK Quote Request:', params);
 
-    // Build SDK request
-    const sdkRequest: ContractCallsQuoteRequest = {
+    // Build POST body for /v1/quote/contractCalls
+    const body = {
         fromChain: params.fromChain,
         toChain: params.toChain,
         fromToken: params.fromToken,
@@ -201,15 +200,25 @@ export async function fetchLiFiQuote(params: LiFiQuoteRequest): Promise<LiFiQuot
         toAmount: params.toAmount,
         contractCalls: params.contractCalls,
         integrator: params.integrator || 'Magnee',
-        slippage: 0.03, // params.slippage ?? 0.03,  // User setting or 3% default
-    } as ContractCallsQuoteRequest;
+        slippage: 0.03,
+    };
 
-    // SDK functions use global config - no client arg needed
-    const step = await getContractCallsQuote(sdkRequest);
-    
-    console.log('[Magnee] Li.Fi SDK Quote Result:', step);
+    const response = await fetch('https://li.quest/v1/quote/contractCalls', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
 
-    // Convert SDK response to our interface format
+    if (!response.ok) {
+        const error = await response.json().catch(() => ({ message: response.statusText }));
+        throw new Error(`Li.Fi quote failed (${response.status}): ${error.message || JSON.stringify(error)}`);
+    }
+
+    const step = await response.json() as LiFiStep;
+
+    console.log('[Magnee] Li.Fi Quote Result:', step);
+
+    // Convert response to our interface format
     return {
         transactionRequest: {
             data: step.transactionRequest?.data as string || '0x',

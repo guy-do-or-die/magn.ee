@@ -12,6 +12,7 @@ interface PendingRequest {
         data: string;
         from?: string;
         chainId?: number;
+        detectedAction?: any;
     };
     tabId?: number; // Store origin tab
 }
@@ -33,7 +34,7 @@ chrome.commands.onCommand.addListener((command) => {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.type === 'MAGNEE_TX') {
-        const { to, value, data, from, chainId } = message.payload;
+        const { to, value, data, from, chainId, detectedAction } = message.payload;
 
         // Use ID from content script if available to match status updates
         const reqId = message.id || Date.now().toString();
@@ -41,7 +42,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         // Store secure payload and callback in memory
         pendingRequests.set(reqId, {
             callback: sendResponse,
-            payload: { to, value, data, from, chainId },
+            payload: { to, value: value || '0x0', data, from, chainId, detectedAction },
             tabId: sender.tab?.id
         });
 

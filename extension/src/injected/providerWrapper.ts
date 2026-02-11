@@ -7,10 +7,66 @@
  * SOLID: Single responsibility - just wraps provider, delegates to handlers
  */
 
-import { handlePayableTransaction, handleDirectExecution } from './handlers/txHandler';
+import { handleInterceptedTransaction, handleDirectExecution } from './handlers/txHandler';
 import { getCurrentChainId, type RequestFn } from './handlers/chainUtils';
+import { detectAction } from '../lib/actions';
 
 console.log('[Magnee] Provider wrapper injecting...');
+
+// ============================================================================
+// Fetch-level allowance spoofing
+// ============================================================================
+// Dapps like Aave use their own JsonRpcProvider (ethers.js) that makes HTTP
+// requests directly to their RPC proxy, bypassing window.ethereum entirely.
+// We intercept fetch() to spoof allowance() → max uint256 so dapps skip their
+// approval step. Magnee handles the actual approval in batched execution.
+
+const MAX_ALLOWANCE = '0x' + 'f'.repeat(64);
+const LARGE_BALANCE  = '0x' + 'f'.repeat(32).padStart(64, '0'); // ~3.4e38 — large but won't overflow
+const ALLOWANCE_SELECTOR  = '0xdd62ed3e';  // allowance(address,address)
+const BALANCEOF_SELECTOR  = '0x70a08231';  // balanceOf(address)
+const _originalFetch = window.fetch;
+
+(window as any).fetch = async function (input: RequestInfo | URL, init?: RequestInit) {
+    if (init?.body && typeof init.body === 'string') {
+        try {
+            const body = JSON.parse(init.body);
+            if (body.method === 'eth_call') {
+                const selector = body.params?.[0]?.data?.toLowerCase().slice(0, 10);
+                if (selector === ALLOWANCE_SELECTOR) {
+                    console.log('[Magnee] Spoofing allowance via fetch → max uint256');
+                    return new Response(JSON.stringify({
+                        jsonrpc: '2.0', id: body.id ?? 1, result: MAX_ALLOWANCE,
+                    }), { status: 200, headers: { 'content-type': 'application/json' } });
+                }
+                if (selector === BALANCEOF_SELECTOR) {
+                    console.log('[Magnee] Spoofing balanceOf via fetch → large balance');
+                    return new Response(JSON.stringify({
+                        jsonrpc: '2.0', id: body.id ?? 1, result: LARGE_BALANCE,
+                    }), { status: 200, headers: { 'content-type': 'application/json' } });
+                }
+            }
+            // eth_estimateGas: pass through, but if it reverts return a safe estimate
+            // (on-chain simulation reverts due to missing allowance/balance, but Magnee
+            // handles the actual approval + bridging in batched execution)
+            if (body.method === 'eth_estimateGas') {
+                const resp = await _originalFetch.call(this, input, init);
+                const clone = resp.clone();
+                try {
+                    const json = await clone.json();
+                    if (json.error) {
+                        console.log('[Magnee] eth_estimateGas reverted, returning safe estimate:', json.error.message?.slice(0, 60));
+                        return new Response(JSON.stringify({
+                            jsonrpc: '2.0', id: body.id ?? 1, result: '0x100000',  // ~1M gas
+                        }), { status: 200, headers: { 'content-type': 'application/json' } });
+                    }
+                } catch { /* response parsing failed, return original */ }
+                return resp;
+            }
+        } catch { /* not JSON — pass through */ }
+    }
+    return _originalFetch.call(this, input, init);
+};
 
 // ============================================================================
 // Types
@@ -48,13 +104,32 @@ function wrapProvider(provider: EthereumProvider): EthereumProvider {
     // (MetaMask's wallet_sendCalls fallback calls this.request() internally)
     let processing = false;
 
-    // Override request method — only intercept eth_sendTransaction
+    // Override request method — intercept eth_sendTransaction
+    // Known function selectors for diagnostics
+    const SELECTORS: Record<string, string> = {
+        '0xdd62ed3e': 'allowance(address,address)',
+        '0x095ea7b3': 'approve(address,uint256)',
+        '0xa9059cbb': 'transfer(address,uint256)',
+        '0x23b872dd': 'transferFrom(address,address,uint256)',
+        '0x70a08231': 'balanceOf(address)',
+        '0x252dba42': 'aggregate(Call[])',        // Multicall
+        '0x82ad56cb': 'aggregate3(Call3[])',       // Multicall3
+        '0x174dea71': 'aggregate3Value(Call3Value[])', // Multicall3
+    };
+
     provider.request = async function (args: { method: string; params?: any[] }) {
+        // === DIAGNOSTICS: log interesting provider calls ===
+        if (args.method === 'eth_call') {
+            const callData = args.params?.[0]?.data as string | undefined;
+            const to = args.params?.[0]?.to as string | undefined;
+            const selector = callData?.slice(0, 10)?.toLowerCase();
+            const name = selector ? (SELECTORS[selector] || selector) : '(no data)';
+            console.log(`[Magnee:diag] eth_call → ${to?.slice(0, 10)}… ${name}`);
+        }
+
         // Fast path: everything except eth_sendTransaction goes straight through
         if (args.method !== 'eth_sendTransaction') {
             // Block dapp chain switches while Magnee is processing
-            // (prevents Aave etc. from reverting Magnee's chain switches)
-            // Wallet bridge sets __magneeFromBridge=true to bypass this
             if (processing && args.method === 'wallet_switchEthereumChain' 
                 && !(window as any).__magneeFromBridge) {
                 console.log('[Magnee] Suppressing dapp chain switch during processing');
@@ -86,12 +161,17 @@ function wrapProvider(provider: EthereumProvider): EthereumProvider {
         }
 
         try {
-            if (tx && tx.value && BigInt(tx.value) > 0n) {
-                processing = true;
+            if (tx) {
                 const chainId = await getCurrentChainId(originalRequest);
-                return await handlePayableTransaction(tx, chainId, args, originalRequest);
-            } else {
-                console.log('[Magnee] Tx skipped: No value or value is 0', tx?.value);
+                const action = await detectAction({ ...tx, chainId });
+                console.log('[Magnee] Detected action:', action.type, 'intercept:', action.shouldIntercept);
+
+                if (action.shouldIntercept) {
+                    processing = true;
+                    return await handleInterceptedTransaction(tx, chainId, action, args, originalRequest);
+                }
+
+                console.log('[Magnee] Action skipped:', action.type);
             }
         } catch (err: any) {
             // User rejected via Magnee popup → propagate to dapp (don't send original tx)

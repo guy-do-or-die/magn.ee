@@ -7,9 +7,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@magnee/ui/components/select'
 import { Search, Loader2, ExternalLink, CheckCircle, XCircle, AlertTriangle, ArrowRight, ArrowUpFromLine, Cable, ArrowDownToLine, Crosshair, ClipboardList, User, KeyRound } from 'lucide-react'
-import { CHAIN_META, getChainMeta } from '@/lib/constants'
+import { CHAIN_META, getChainMeta, explorerUrl } from '@/lib/constants'
 import { analyzeTransaction, type TxAnalysis } from '@/lib/explorer'
 import { shortenAddress } from '@/lib/utils'
+import { AddressChip } from '@magnee/ui/components/address-chip'
 import { useSearchParams } from 'react-router-dom'
 
 export function Explorer() {
@@ -160,9 +161,9 @@ function TxResult({ data }: { data: TxAnalysis }) {
               </a>
             </dd>
             <dt className="text-muted-foreground">From</dt>
-            <dd className="font-mono">{shortenAddress(source.from)}</dd>
+            <dd><AddressChip address={source.from} explorerUrl={explorerUrl(source.chain)} chars={6} /></dd>
             <dt className="text-muted-foreground">To</dt>
-            <dd className="font-mono">{source.to ? shortenAddress(source.to) : '—'}</dd>
+            <dd>{source.to ? <AddressChip address={source.to} explorerUrl={explorerUrl(source.chain)} chars={6} /> : '—'}</dd>
             <dt className="text-muted-foreground">Method</dt>
             <dd><Badge variant="outline" className="text-xs">{source.method}</Badge></dd>
             <dt className="text-muted-foreground">Gas</dt>

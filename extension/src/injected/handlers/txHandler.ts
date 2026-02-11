@@ -4,9 +4,9 @@
  */
 
 import { createMagneefiedTx, buildWalletSendCalls, getCallsFromRoute, type Route } from '../magneeUtils';
-import { ensureChain, getCodeDirect, sanitizeTx, type RequestFn } from './chainUtils';
-import { requestFromBackground, type MagneeResponse } from './messaging';
-import { getDelegateAddress } from '../../lib/delegates';
+import { ensureChain, sanitizeTx, type RequestFn } from './chainUtils';
+import { requestFromBackground } from './messaging';
+import type { DetectedAction } from '../../lib/actions';
 
 /**
  * Wait for a transaction to be confirmed
@@ -271,19 +271,20 @@ async function handleForward(
 }
 
 /**
- * Main handler for payable transactions
+ * Main handler for intercepted transactions
  * Shows Magnee popup and handles user response
  */
-export async function handlePayableTransaction(
+export async function handleInterceptedTransaction(
     tx: any,
     chainId: number,
+    action: DetectedAction,
     originalArgs: any,
     requestFn: RequestFn
 ): Promise<string> {
-    console.log('[Magnee] Found payable transaction:', tx);
+    console.log('[Magnee] Intercepted transaction:', action.type, tx);
 
-    // Enrich tx with chain ID for UI
-    const payload = { ...tx, chainId };
+    // Enrich tx with chain ID and detected action for UI
+    const payload = { ...tx, chainId, detectedAction: action };
 
     try {
         // Request user action from popup
