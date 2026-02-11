@@ -34,7 +34,7 @@ export function HowItWorks() {
         <div className="mb-20 text-center">
           <p className="mb-3 text-sm font-medium uppercase tracking-widest text-primary">How It Works</p>
           <h2 className="text-3xl font-bold tracking-tight sm:text-5xl">
-            Three steps. One click.
+            Three steps. One transaction.
           </h2>
         </div>
 
