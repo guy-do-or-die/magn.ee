@@ -20,7 +20,7 @@ const STEPS = [
   {
     icon: Shield,
     title: 'Execute',
-    description: 'Your wallet stays msg.sender on the destination chain via EIP-7702 delegation. No wrappers, no proxies.',
+    description: 'Your wallet stays msg.sender on the destination chain via EIP-7702 delegation. No new accounts, no asset migration.',
     color: 'from-emerald-400 to-teal-500',
     iconBg: 'bg-emerald-500/10 border-emerald-500/20',
     number: '03',

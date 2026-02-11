@@ -38,7 +38,7 @@ export function Features() {
             Built for the multi-chain world
           </h2>
           <p className="mx-auto mt-4 max-w-lg text-muted-foreground">
-            Protocol-neutral. Wallet-native. No smart contract wallets, no wrappers.
+            Protocol-neutral. Wallet-native. Your EOA stays msg.sender.
           </p>
         </div>
 
